@@ -1,12 +1,10 @@
 'use client'
 // components/TracePanel.jsx
-// LangSmith 可观测性面板
-// 展示每次 agent 执行的运行记录、耗时、token 用量、工具调用链路
 
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, ExternalLink, ChevronDown, ChevronRight,
          Clock, Zap, AlertCircle, CheckCircle, Loader,
-         Activity, Terminal, Brain } from 'lucide-react'
+         Activity, Terminal, Brain, FolderOpen } from 'lucide-react'
 import { apiListTraces, apiGetTrace } from '../lib/client.js'
 
 // ── 常量 ──────────────────────────────────────────────
@@ -21,20 +19,28 @@ const RUN_TYPE_COLOR = {
   tool:  'var(--accent2)',
 }
 const STATUS_ICON = {
-  success: <CheckCircle  size={13} color="var(--ok)"  />,
-  error:   <AlertCircle  size={13} color="var(--err)" />,
-  pending: <Loader       size={13} color="var(--warn)" style={{ animation:'spin .8s linear infinite' }} />,
+  success: <CheckCircle size={13} color="var(--ok)"  />,
+  error:   <AlertCircle size={13} color="var(--err)" />,
+  pending: <Loader      size={13} color="var(--warn)" style={{ animation:'spin .8s linear infinite' }} />,
 }
 
-// ── 子组件：Run 行 ──────────────────────────────────
+// ── 子组件：Run 行 ────────────────────────────────────
 function RunRow({ run, onExpand, expanded }) {
-  const dur   = run.latency_ms != null ? fmtMs(run.latency_ms)  : '—'
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const dur   = run.latency_ms != null ? fmtMs(run.latency_ms) : '—'
   const tok   = run.token_usage?.total ?? null
   const typeC = RUN_TYPE_COLOR[run.run_type] ?? 'var(--sub)'
 
+  // 耗时颜色：> 10s 红，> 5s 橙，其余正常
+  const latColor = run.latency_ms > 10000 ? 'var(--err)'
+                 : run.latency_ms > 5000  ? 'var(--warn)'
+                 : 'var(--ok)'
+
   return (
     <div style={sR.row} className="fade-in">
-      {/* 展开按钮 */}
+      {/* 展开 */}
       <button onClick={onExpand} style={sR.expandBtn}>
         {expanded ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
       </button>
@@ -42,8 +48,8 @@ function RunRow({ run, onExpand, expanded }) {
       {/* 状态 */}
       <span style={sR.statusIcon}>{STATUS_ICON[run.status] ?? STATUS_ICON.pending}</span>
 
-      {/* 类型徽章 */}
-      <span style={{ ...sR.typeBadge, color: typeC, borderColor: typeC + '44', background: typeC + '11' }}>
+      {/* 类型 */}
+      <span style={{ ...sR.typeBadge, color: typeC, borderColor: typeC+'44', background: typeC+'11' }}>
         {RUN_TYPE_ICON[run.run_type]}
         {run.run_type}
       </span>
@@ -51,14 +57,37 @@ function RunRow({ run, onExpand, expanded }) {
       {/* 名称 */}
       <span style={sR.name} title={run.name}>{run.name}</span>
 
-      {/* 时间 */}
-      <span style={sR.meta}>
-        <Clock size={10} style={{ marginRight:3 }}/>
-        {run.start_time ? new Date(run.start_time).toLocaleTimeString() : '—'}
+      {/* Input 预览 */}
+      <span style={sR.preview} title={run.input_preview ?? ''}>
+        {run.input_preview ?? <span style={{ color:'var(--border2)' }}>—</span>}
       </span>
 
-      {/* 耗时 */}
+      {/* Output 预览 */}
+      <span style={sR.preview} title={run.output_preview ?? ''}>
+        {run.output_preview ?? <span style={{ color:'var(--border2)' }}>—</span>}
+      </span>
+
+      {/* Error */}
+      <span style={sR.errorCell}>
+        {run.error
+          ? <span title={run.error} style={{ color:'var(--err)', fontFamily:'var(--mono)', fontSize:11 }}>
+              <AlertCircle size={11} style={{ marginRight:3, verticalAlign:'middle' }}/>
+              {trunc(run.error, 28)}
+            </span>
+          : <span style={{ color:'var(--border2)' }}>—</span>
+        }
+      </span>
+
+      {/* 开始时间 */}
       <span style={sR.meta}>
+        <Clock size={10} style={{ marginRight:3 }}/>
+        {mounted && run.start_time
+          ? new Date(run.start_time).toLocaleTimeString('zh-CN', { timeZone: 'America/Toronto', hour:'2-digit', minute:'2-digit', second:'2-digit' })
+          : '—'}
+      </span>
+
+      {/* 耗时（带颜色） */}
+      <span style={{ ...sR.meta, color: latColor }}>
         <Zap size={10} style={{ marginRight:3 }}/>
         {dur}
       </span>
@@ -76,11 +105,11 @@ function RunRow({ run, onExpand, expanded }) {
   )
 }
 
-// ── 子组件：展开详情 ────────────────────────────────
+// ── 子组件：展开详情 ──────────────────────────────────
 function RunDetail({ runId }) {
-  const [detail, setDetail] = useState(null)
+  const [detail,  setDetail]  = useState(null)
   const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState('')
+  const [err,     setErr]     = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -97,7 +126,6 @@ function RunDetail({ runId }) {
 
   return (
     <div style={sD.wrap}>
-      {/* Inputs / Outputs */}
       {run.inputs && Object.keys(run.inputs).length > 0 && (
         <div style={sD.section}>
           <div style={sD.sectionTitle}>Inputs</div>
@@ -111,13 +139,11 @@ function RunDetail({ runId }) {
         </div>
       )}
       {run.error && (
-        <div style={{ ...sD.section, borderColor: 'rgba(248,113,113,.3)', background: 'rgba(248,113,113,.06)' }}>
+        <div style={{ ...sD.section, borderColor:'rgba(248,113,113,.3)', background:'rgba(248,113,113,.06)' }}>
           <div style={{ ...sD.sectionTitle, color:'var(--err)' }}>Error</div>
           <pre style={{ ...sD.pre, color:'var(--err)' }}>{run.error}</pre>
         </div>
       )}
-
-      {/* Child runs */}
       {children.length > 0 && (
         <div style={sD.section}>
           <div style={sD.sectionTitle}>执行链路（{children.length} 步）</div>
@@ -127,15 +153,12 @@ function RunDetail({ runId }) {
                 <span style={{ color:'var(--border2)', fontFamily:'var(--mono)', fontSize:10, flexShrink:0 }}>
                   {String(i+1).padStart(2,'0')}
                 </span>
-                <span style={{
-                  ...sD.childType,
-                  color: RUN_TYPE_COLOR[c.run_type] ?? 'var(--sub)',
-                }}>{c.run_type}</span>
+                <span style={{ ...sD.childType, color: RUN_TYPE_COLOR[c.run_type] ?? 'var(--sub)' }}>
+                  {c.run_type}
+                </span>
                 <span style={sD.childName}>{c.name}</span>
                 <span style={sD.childMs}>{c.latency_ms != null ? fmtMs(c.latency_ms) : '—'}</span>
-                {c.token_usage?.total ? (
-                  <span style={sD.childTok}>{c.token_usage.total} tok</span>
-                ) : null}
+                {c.token_usage?.total ? <span style={sD.childTok}>{c.token_usage.total} tok</span> : null}
                 <span style={{ marginLeft:'auto' }}>{STATUS_ICON[c.status] ?? STATUS_ICON.pending}</span>
               </div>
             ))}
@@ -149,24 +172,22 @@ function RunDetail({ runId }) {
 // ── 主组件 ────────────────────────────────────────────
 export default function TracePanel() {
   const [runs,     setRuns]     = useState([])
+  const [project,  setProject]  = useState('')    // ← 项目名
   const [loading,  setLoading]  = useState(false)
   const [err,      setErr]      = useState('')
   const [cursor,   setCursor]   = useState('')
-  const [expanded, setExpanded] = useState(null)   // 当前展开的 run id
+  const [expanded, setExpanded] = useState(null)
   const [filter,   setFilter]   = useState('')
   const [limit,    setLimit]    = useState(20)
 
   const load = useCallback(async (append = false) => {
     setLoading(true); setErr('')
     try {
-      const res = await apiListTraces({
-        limit,
-        filter,
-        cursor: append ? cursor : '',
-      })
+      const res = await apiListTraces({ limit, filter, cursor: append ? cursor : '' })
       if (res.error) { setErr(res.error); setLoading(false); return }
       setRuns(prev => append ? [...prev, ...res.runs] : res.runs)
       setCursor(res.cursor ?? '')
+      if (res.project) setProject(res.project)   // ← 接收项目名
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -174,25 +195,40 @@ export default function TracePanel() {
     }
   }, [limit, filter, cursor])
 
-  useEffect(() => { load() }, [])   // 首次加载
+  useEffect(() => { load() }, [])
 
-  const toggleExpand = (id) => setExpanded(prev => prev === id ? null : id)
+  const toggleExpand = id => setExpanded(prev => prev === id ? null : id)
 
-  const totalTok = runs.reduce((acc, r) => acc + (r.token_usage?.total ?? 0), 0)
-  const avgMs    = runs.length
-    ? Math.round(runs.filter(r => r.latency_ms).reduce((a,r) => a + r.latency_ms, 0) / runs.filter(r=>r.latency_ms).length)
+  const totalTok  = runs.reduce((acc, r) => acc + (r.token_usage?.total ?? 0), 0)
+  const validRuns = runs.filter(r => r.latency_ms)
+  const avgMs     = validRuns.length
+    ? Math.round(validRuns.reduce((a, r) => a + r.latency_ms, 0) / validRuns.length)
     : 0
+  const errorCnt  = runs.filter(r => r.status === 'error').length
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
-      {/* ── 顶部统计 & 过滤 ───────────────────────── */}
+      {/* ── 顶部：项目名 + 统计 + 过滤 ─────────────── */}
       <div style={s.header}>
+
+        {/* 项目名 */}
+        {project && (
+          <div style={s.projectBar}>
+            <FolderOpen size={13} style={{ color:'var(--accent)', flexShrink:0 }}/>
+            <span style={s.projectName}>{project}</span>
+            <span style={s.projectSub}>LangSmith 运行记录 · Token 用量 · 执行链路</span>
+          </div>
+        )}
+
         {/* 统计卡 */}
         <div style={s.statRow}>
-          <StatChip label="总 Runs" value={runs.length} color="var(--accent)" />
+          <StatChip label="总 Runs"  value={runs.length}                          color="var(--accent)"  />
           <StatChip label="总 Token" value={totalTok ? totalTok.toLocaleString() : '—'} color="var(--accent3)" />
-          <StatChip label="平均耗时" value={avgMs ? fmtMs(avgMs) : '—'} color="var(--accent2)" />
+          <StatChip label="平均耗时" value={avgMs ? fmtMs(avgMs) : '—'}           color="var(--accent2)" />
+          {errorCnt > 0 && (
+            <StatChip label="错误"   value={errorCnt}                             color="var(--err)"     />
+          )}
         </div>
 
         {/* 过滤 & 刷新 */}
@@ -226,15 +262,18 @@ export default function TracePanel() {
         </div>
       )}
 
-      {/* ── Run 列表 ──────────────────────────────── */}
+      {/* ── Run 列表（横向可滚动） ─────────────────── */}
       <div style={s.listWrap}>
         {/* 表头 */}
         <div style={s.thead}>
           <span style={{ width:22 }}/>
           <span style={{ width:16 }}/>
-          <span style={{ width:54 }}>类型</span>
-          <span style={{ flex:1 }}>名称</span>
-          <span style={{ width:72 }}>开始</span>
+          <span style={{ width:60 }}>类型</span>
+          <span style={{ width:100 }}>名称</span>
+          <span style={{ flex:'1 1 160px', minWidth:120 }}>Input</span>
+          <span style={{ flex:'1 1 160px', minWidth:120 }}>Output</span>
+          <span style={{ width:110 }}>Error</span>
+          <span style={{ width:80 }}>开始</span>
           <span style={{ width:60 }}>耗时</span>
           <span style={{ width:72 }}>Token</span>
           <span style={{ width:20 }}/>
@@ -265,12 +304,9 @@ export default function TracePanel() {
           )}
         </div>
 
-        {/* 加载更多 */}
         {cursor && !loading && (
           <div style={s.loadMore}>
-            <button onClick={() => load(true)} style={s.loadMoreBtn}>
-              加载更多
-            </button>
+            <button onClick={() => load(true)} style={s.loadMoreBtn}>加载更多</button>
           </div>
         )}
       </div>
@@ -281,14 +317,14 @@ export default function TracePanel() {
 // ── 工具组件 ──────────────────────────────────────────
 function StatChip({ label, value, color }) {
   return (
-    <div style={{ ...s.chip, borderColor: color + '33', background: color + '0e' }}>
+    <div style={{ ...s.chip, borderColor: color+'33', background: color+'0e' }}>
       <span style={{ fontFamily:'var(--mono)', fontSize:16, fontWeight:700, color }}>{value}</span>
       <span style={{ fontSize:11, color:'var(--sub)', marginTop:1 }}>{label}</span>
     </div>
   )
 }
 
-// ── 格式化 ────────────────────────────────────────────
+// ── 工具函数 ──────────────────────────────────────────
 function fmtMs(ms) {
   if (ms == null) return '—'
   if (ms < 1000)  return `${ms}ms`
@@ -296,18 +332,33 @@ function fmtMs(ms) {
   return `${Math.floor(ms/60000)}m ${Math.round((ms%60000)/1000)}s`
 }
 
+function trunc(str, max) {
+  if (!str) return ''
+  return str.length > max ? str.slice(0, max) + '…' : str
+}
+
 // ── 样式 ──────────────────────────────────────────────
 const s = {
   header: {
-    padding: '14px 20px', borderBottom:'1px solid var(--border)',
+    padding:'12px 20px', borderBottom:'1px solid var(--border)',
     flexShrink:0, display:'flex', flexDirection:'column', gap:10,
   },
-  statRow:  { display:'flex', gap:10 },
-  filterRow:{ display:'flex', gap:8, alignItems:'center' },
+  projectBar: {
+    display:'flex', alignItems:'center', gap:8,
+    paddingBottom:8, borderBottom:'1px solid var(--border)',
+  },
+  projectName: {
+    fontFamily:'var(--mono)', fontSize:13, fontWeight:700,
+    color:'var(--text)', letterSpacing:'.03em',
+  },
+  projectSub: {
+    fontSize:11, color:'var(--sub)', marginLeft:4,
+  },
+  statRow:   { display:'flex', gap:10 },
+  filterRow: { display:'flex', gap:8, alignItems:'center' },
   chip: {
     display:'flex', flexDirection:'column', alignItems:'center',
-    padding:'8px 16px', borderRadius:'var(--r)', border:'1px solid',
-    minWidth:80,
+    padding:'8px 16px', borderRadius:'var(--r)', border:'1px solid', minWidth:80,
   },
   filterInput: {
     flex:1, padding:'6px 12px', background:'var(--s2)',
@@ -338,9 +389,9 @@ const s = {
     padding:'6px 14px', borderBottom:'1px solid var(--border)',
     fontFamily:'var(--mono)', fontSize:10, fontWeight:600,
     color:'var(--border2)', letterSpacing:'.06em', textTransform:'uppercase',
-    flexShrink:0,
+    flexShrink:0, minWidth:900, overflowX:'auto',
   },
-  list: { flex:1, overflowY:'auto' },
+  list:  { flex:1, overflowY:'auto', overflowX:'auto' },
   empty: {
     padding:'40px 20px', textAlign:'center',
     color:'var(--sub)', fontFamily:'var(--mono)', fontSize:13, lineHeight:1.8,
@@ -361,7 +412,7 @@ const sR = {
   row: {
     display:'flex', alignItems:'center', gap:8, padding:'8px 14px',
     borderBottom:'1px solid var(--border)', transition:'background .15s',
-    cursor:'default',
+    cursor:'default', minWidth:900,
   },
   expandBtn: {
     padding:2, background:'none', border:'none',
@@ -373,16 +424,29 @@ const sR = {
     display:'inline-flex', alignItems:'center', gap:3,
     padding:'2px 7px', borderRadius:99, border:'1px solid',
     fontFamily:'var(--mono)', fontSize:10, fontWeight:600,
-    flexShrink:0, width:54,
+    flexShrink:0, width:60,
   },
   name: {
-    flex:1, fontFamily:'var(--mono)', fontSize:12, color:'var(--text)',
+    fontFamily:'var(--mono)', fontSize:12, color:'var(--text)',
     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+    width:100, flexShrink:0,
+  },
+  // Input / Output 列：弹性宽度，截断
+  preview: {
+    flex:'1 1 160px', minWidth:120,
+    fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)',
+    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+  },
+  errorCell: {
+    width:110, flexShrink:0,
+    fontFamily:'var(--mono)', fontSize:11,
+    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+    display:'flex', alignItems:'center',
   },
   meta: {
     fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)',
     display:'flex', alignItems:'center', flexShrink:0,
-    width:72, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+    width:80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
   },
   extLink: {
     color:'var(--sub)', display:'flex', alignItems:'center',
@@ -393,10 +457,8 @@ const sR = {
 
 const sD = {
   wrap: {
-    padding:'10px 14px 14px 44px',
-    borderBottom:'1px solid var(--border)',
-    background:'var(--bg)',
-    display:'flex', flexDirection:'column', gap:8,
+    padding:'10px 14px 14px 44px', borderBottom:'1px solid var(--border)',
+    background:'var(--bg)', display:'flex', flexDirection:'column', gap:8,
   },
   hint: { color:'var(--sub)', fontFamily:'var(--mono)', fontSize:12 },
   section: {
@@ -405,8 +467,7 @@ const sD = {
   },
   sectionTitle: {
     fontFamily:'var(--mono)', fontSize:10, fontWeight:600,
-    color:'var(--sub)', letterSpacing:'.08em', textTransform:'uppercase',
-    marginBottom:6,
+    color:'var(--sub)', letterSpacing:'.08em', textTransform:'uppercase', marginBottom:6,
   },
   pre: {
     fontFamily:'var(--mono)', fontSize:11.5, color:'var(--text)',
@@ -417,10 +478,7 @@ const sD = {
     display:'flex', alignItems:'center', gap:8, padding:'5px 0',
     borderBottom:'1px solid var(--border)',
   },
-  childType: {
-    fontFamily:'var(--mono)', fontSize:10, fontWeight:600,
-    width:36, flexShrink:0,
-  },
+  childType: { fontFamily:'var(--mono)', fontSize:10, fontWeight:600, width:36, flexShrink:0 },
   childName: {
     flex:1, fontFamily:'var(--mono)', fontSize:11.5, color:'var(--text)',
     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
