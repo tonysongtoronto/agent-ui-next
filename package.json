@@ -1,0 +1,21 @@
+{
+  "name": "agent-ui-next",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:init": "node -e \"import(\"./lib/db.js\").then(m=>m.initDb()).then(()=>console.log(\"DB initialized\"))\""
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@prisma/client": "^7.8.0",
+    "lucide-react": "^0.383.0",
+    "marked": "^12.0.0",
+    "next": "^14.2.0",
+    "prisma": "^7.8.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

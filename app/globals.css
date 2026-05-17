@@ -1,0 +1,77 @@
+/* ── Design tokens ─────────────────────────────────────── */
+:root {
+  --bg:       #07090f;
+  --s1:       #0c0f18;
+  --s2:       #111520;
+  --s3:       #181d2e;
+  --border:   #1e2538;
+  --border2:  #28334e;
+  --accent:   #5b9cf6;
+  --accent2:  #1de9b6;
+  --accent3:  #a78bfa;
+  --warn:     #fbbf24;
+  --err:      #f87171;
+  --ok:       #34d399;
+  --text:     #dde4f4;
+  --sub:      #7a8baa;
+  --mono:     'JetBrains Mono', monospace;
+  --sans:     'Sora', sans-serif;
+  --r:        10px;
+  --r-lg:     14px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--sub); }
+
+/* ── Markdown rendered content ─────────────────────────── */
+.md-body { font-size: 13.5px; line-height: 1.8; }
+.md-body p  { margin-bottom: 10px; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body h1,.md-body h2,.md-body h3 { color: var(--accent2); font-family: var(--mono); margin: 14px 0 8px; font-size: 13px; letter-spacing: .04em; }
+.md-body code { font-family: var(--mono); font-size: 12px; background: #0d1220; border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--accent2); }
+.md-body pre  { background: #0a0e1a; border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-x: auto; margin: 10px 0; }
+.md-body pre code { background: none; border: none; padding: 0; color: var(--text); }
+.md-body ul,.md-body ol { padding-left: 20px; margin-bottom: 10px; }
+.md-body li  { margin-bottom: 4px; }
+.md-body blockquote { border-left: 3px solid var(--accent); padding: 6px 14px; margin: 10px 0; color: var(--sub); font-style: italic; background: rgba(91,156,246,.05); border-radius: 0 6px 6px 0; }
+.md-body table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12.5px; }
+.md-body th { background: #111827; color: var(--accent2); font-weight: 600; padding: 8px 12px; text-align: left; border-bottom: 2px solid var(--border); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.md-body td { padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.md-body tr:last-child td { border-bottom: none; }
+.md-body tr:nth-child(even) td { background: rgba(255,255,255,.015); }
+.md-body strong { color: var(--text); font-weight: 600; }
+.md-body em { color: var(--sub); }
+.md-body hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.md-body a { color: var(--accent); text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+
+/* ── Animations ────────────────────────────────────────── */
+@keyframes fadeUp   { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
+@keyframes fadeIn   { from { opacity:0 } to { opacity:1 } }
+@keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes spin     { to { transform: rotate(360deg) } }
+@keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes slideIn  { from { opacity:0; transform:translateX(-8px) } to { opacity:1; transform:none } }
+
+.fade-up  { animation: fadeUp  .25s ease both; }
+.fade-in  { animation: fadeIn  .2s  ease both; }
+.slide-in { animation: slideIn .2s  ease both; }

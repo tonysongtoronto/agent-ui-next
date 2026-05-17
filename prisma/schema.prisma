@@ -1,0 +1,37 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 会话元数据（别名、Pin、备注）
+model Session {
+  id         String   @id @default(cuid())
+  thread_id  String   @unique          // LangGraph 的 thread_id，如 "user_abc123"
+  label      String   @default("")     // 用户起的名字，如"周报讨论"
+  pinned     Boolean  @default(false)  // 是否置顶
+  note       String   @default("")     // 备注
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// 用户偏好
+model Preference {
+  id    String @id @default("singleton") // 只存一行
+  data  String @default("{}")            // JSON 字符串
+}
+
+// Prompt 收藏夹
+model Prompt {
+  id         String   @id @default(cuid())
+  title      String                       // 名称，如"介绍量子计算"
+  content    String                       // prompt 正文
+  tags       String   @default("")        // 逗号分隔的标签
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
