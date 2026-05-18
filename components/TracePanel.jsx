@@ -1,7 +1,7 @@
 'use client'
 // components/TracePanel.jsx
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, ExternalLink, ChevronDown, ChevronRight,
          Clock, Zap, AlertCircle, CheckCircle, Loader,
          Activity, Terminal, Brain, FolderOpen } from 'lucide-react'
@@ -33,7 +33,6 @@ function RunRow({ run, onExpand, expanded }) {
   const tok   = run.token_usage?.total ?? null
   const typeC = RUN_TYPE_COLOR[run.run_type] ?? 'var(--sub)'
 
-  // 耗时颜色：> 10s 红，> 5s 橙，其余正常
   const latColor = run.latency_ms > 10000 ? 'var(--err)'
                  : run.latency_ms > 5000  ? 'var(--warn)'
                  : 'var(--ok)'
@@ -107,7 +106,7 @@ function ChildRunRow({ child, index, depth = 0 }) {
   const toggle = async () => {
     if (open) { setOpen(false); return }
     setOpen(true)
-    if (detail || loading) return          // 已缓存，无需再请求
+    if (detail || loading) return
     setLoading(true); setErr('')
     try {
       const d = await apiGetTrace(child.id)
@@ -174,7 +173,7 @@ function ChildRunRow({ child, index, depth = 0 }) {
           {child.name}
         </span>
 
-        {/* input 预览（灰色摘要） */}
+        {/* input 预览 */}
         {child.input_preview && (
           <span style={{
             fontFamily:'var(--mono)', fontSize:10, color:'var(--border2)',
@@ -296,7 +295,6 @@ function RunDetail({ runId }) {
   if (err)     return <div style={sD.wrap}><span style={{ color:'var(--err)', fontFamily:'var(--mono)', fontSize:12 }}>{err}</span></div>
   if (!detail) return null
 
-  // ── [Fix 1] 防御：detail 可能直接是 run 对象，或含 error 字段 ──
   if (detail.error) {
     return (
       <div style={sD.wrap}>
@@ -307,7 +305,7 @@ function RunDetail({ runId }) {
     )
   }
 
-  const run      = detail.run ?? detail   // 兼容 { run, children } 和裸 run 两种格式
+  const run      = detail.run ?? detail
   const children = detail.children ?? []
 
   if (!run) return null
@@ -349,32 +347,54 @@ function RunDetail({ runId }) {
 // ── 主组件 ────────────────────────────────────────────
 export default function TracePanel() {
   const [runs,     setRuns]     = useState([])
-  const [project,  setProject]  = useState('')    // ← 项目名
+  const [project,  setProject]  = useState('')
   const [loading,  setLoading]  = useState(false)
   const [err,      setErr]      = useState('')
-  const [cursor,   setCursor]   = useState('')
+  const [hasMore,  setHasMore]  = useState(false)   // ← 替换 cursor
+  const [offset,   setOffset]   = useState(0)        // ← offset 分页
   const [expanded, setExpanded] = useState(null)
   const [filter,   setFilter]   = useState('')
   const [limit,    setLimit]    = useState(20)
 
+  // 用 ref 持有最新 offset，避免 useCallback 闭包陷阱
+  const offsetRef = useRef(0)
+
   const load = useCallback(async (append = false) => {
     setLoading(true); setErr('')
+    const currentOffset = append ? offsetRef.current : 0
     try {
-      const res = await apiListTraces({ limit, filter, cursor: append ? cursor : '' })
+      const res = await apiListTraces({ limit, filter, offset: currentOffset })
       if (res.error) { setErr(res.error); setLoading(false); return }
       setRuns(prev => append ? [...prev, ...res.runs] : res.runs)
-      setCursor(res.cursor ?? '')
-      console.log('cursor:', res.cursor)   // ← 加这行
-      console.log('runs count:', res.runs.length)  // ← 顺便看看返回了几条
-      if (res.project) setProject(res.project)   // ← 接收项目名
+      const nextOff = currentOffset + res.runs.length
+      offsetRef.current = nextOff
+      setOffset(nextOff)
+      setHasMore(res.hasMore)          // ← 用 hasMore 控制按钮显示
+      if (res.project) setProject(res.project)
     } catch (e) {
       setErr(e.message)
     } finally {
       setLoading(false)
     }
-  }, [limit, filter, cursor])
+  }, [limit, filter])   // ← 不再依赖 offset/cursor，避免无限重建
 
-  useEffect(() => { load() }, [])
+  // 初始加载
+  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // filter / limit 变化时重置并重新加载
+  useEffect(() => {
+    offsetRef.current = 0
+    setOffset(0)
+    setHasMore(false)
+    load(false)
+  }, [filter, limit])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refresh = () => {
+    offsetRef.current = 0
+    setOffset(0)
+    setHasMore(false)
+    load(false)
+  }
 
   const toggleExpand = id => setExpanded(prev => prev === id ? null : id)
 
@@ -415,14 +435,14 @@ export default function TracePanel() {
           <input
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && load()}
+            onKeyDown={e => e.key === 'Enter' && refresh()}
             placeholder="过滤（如：eq(status, 'error')）"
             style={s.filterInput}
           />
           <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={s.select}>
             {[10, 20, 50].map(n => <option key={n} value={n}>{n} 条</option>)}
           </select>
-          <button onClick={() => load()} disabled={loading} style={s.refreshBtn}>
+          <button onClick={refresh} disabled={loading} style={s.refreshBtn}>
             <RefreshCw size={13} style={{ animation: loading ? 'spin .6s linear infinite' : 'none' }}/>
             刷新
           </button>
@@ -482,9 +502,12 @@ export default function TracePanel() {
           )}
         </div>
 
-        {cursor && !loading && (
+        {/* ── 加载更多按钮 —— 用 hasMore 判断，不再用 cursor ── */}
+        {hasMore && !loading && (
           <div style={s.loadMore}>
-            <button onClick={() => load(true)} style={s.loadMoreBtn}>加载更多</button>
+            <button onClick={() => load(true)} style={s.loadMoreBtn}>
+              加载更多（已显示 {runs.length} 条）
+            </button>
           </div>
         )}
       </div>
@@ -609,7 +632,6 @@ const sR = {
     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
     width:100, flexShrink:0,
   },
-  // Input / Output 列：弹性宽度，截断
   preview: {
     flex:'1 1 160px', minWidth:120,
     fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)',
