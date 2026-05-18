@@ -10,10 +10,10 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const limit  = Math.min(parseInt(searchParams.get('limit')  ?? '20'), 50)
   const filter = searchParams.get('filter') ?? ''
-  const cursor = searchParams.get('cursor') ?? ''
+  const offset = parseInt(searchParams.get('offset') ?? '0')
 
   try {
-    const result = await listRuns({ limit, filter, cursor })
+    const result = await listRuns({ limit, filter, offset })
     return Response.json(result)
   } catch (err) {
     return Response.json(
