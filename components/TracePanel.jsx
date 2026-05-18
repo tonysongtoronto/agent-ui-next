@@ -67,22 +67,11 @@ function RunRow({ run, onExpand, expanded }) {
         {run.output_preview ?? <span style={{ color:'var(--border2)' }}>—</span>}
       </span>
 
-      {/* Error */}
-      <span style={sR.errorCell}>
-        {run.error
-          ? <span title={run.error} style={{ color:'var(--err)', fontFamily:'var(--mono)', fontSize:11 }}>
-              <AlertCircle size={11} style={{ marginRight:3, verticalAlign:'middle' }}/>
-              {trunc(run.error, 28)}
-            </span>
-          : <span style={{ color:'var(--border2)' }}>—</span>
-        }
-      </span>
-
       {/* 开始时间 */}
-      <span style={sR.meta}>
+      <span style={{ ...sR.meta, width:148 }}>
         <Clock size={10} style={{ marginRight:3 }}/>
         {mounted && run.start_time
-          ? new Date(run.start_time).toLocaleTimeString('zh-CN', { timeZone: 'America/Toronto', hour:'2-digit', minute:'2-digit', second:'2-digit' })
+          ? new Date(run.start_time).toLocaleString('zh-CN', { timeZone: 'America/Toronto', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' })
           : '—'}
       </span>
 
@@ -105,6 +94,189 @@ function RunRow({ run, onExpand, expanded }) {
   )
 }
 
+// ── 子组件：可展开的子 Run 行（递归） ────────────────
+function ChildRunRow({ child, index, depth = 0 }) {
+  const [open,    setOpen]    = useState(false)
+  const [detail,  setDetail]  = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [err,     setErr]     = useState('')
+
+  const typeColor = RUN_TYPE_COLOR[child.run_type] ?? 'var(--sub)'
+  const indent    = depth * 16
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return }
+    setOpen(true)
+    if (detail || loading) return          // 已缓存，无需再请求
+    setLoading(true); setErr('')
+    try {
+      const d = await apiGetTrace(child.id)
+      setDetail(d)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const run      = detail ? (detail.run ?? detail) : null
+  const grandkids = detail ? (detail.children ?? []) : []
+  const hasInputs  = run?.inputs  && Object.keys(run.inputs).length  > 0
+  const hasOutputs = run?.outputs && Object.keys(run.outputs).length > 0
+  const hasError   = run?.error
+
+  return (
+    <div>
+      {/* ── 行本身 ── */}
+      <div
+        onClick={toggle}
+        style={{
+          display:'flex', alignItems:'center', gap:8,
+          padding:'5px 0', paddingLeft: indent,
+          borderBottom:'1px solid var(--border)',
+          cursor:'pointer', transition:'background .12s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      >
+        {/* 展开箭头 */}
+        <span style={{ color:'var(--border2)', flexShrink:0, display:'flex', width:14 }}>
+          {open ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+        </span>
+
+        {/* 序号 */}
+        <span style={{ color:'var(--border2)', fontFamily:'var(--mono)', fontSize:10, flexShrink:0, width:18 }}>
+          {String(index + 1).padStart(2, '0')}
+        </span>
+
+        {/* 状态 */}
+        <span style={{ display:'flex', flexShrink:0 }}>
+          {STATUS_ICON[child.status] ?? STATUS_ICON.pending}
+        </span>
+
+        {/* 类型徽章 */}
+        <span style={{
+          display:'inline-flex', alignItems:'center', gap:3,
+          padding:'1px 6px', borderRadius:99,
+          border:`1px solid ${typeColor}44`, background:`${typeColor}11`,
+          fontFamily:'var(--mono)', fontSize:10, fontWeight:600,
+          color: typeColor, flexShrink:0, width:52,
+        }}>
+          {RUN_TYPE_ICON[child.run_type]}
+          {child.run_type}
+        </span>
+
+        {/* 名称 */}
+        <span style={{
+          flex:1, fontFamily:'var(--mono)', fontSize:11.5, color:'var(--text)',
+          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+        }}>
+          {child.name}
+        </span>
+
+        {/* input 预览（灰色摘要） */}
+        {child.input_preview && (
+          <span style={{
+            fontFamily:'var(--mono)', fontSize:10, color:'var(--border2)',
+            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+            maxWidth:140, flexShrink:1,
+          }} title={child.input_preview}>
+            {child.input_preview}
+          </span>
+        )}
+
+        {/* 耗时 */}
+        <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)', flexShrink:0, width:48 }}>
+          {child.latency_ms != null ? fmtMs(child.latency_ms) : '—'}
+        </span>
+
+        {/* Token */}
+        {child.token_usage?.total
+          ? <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)', flexShrink:0, width:56 }}>
+              {child.token_usage.total} tok
+            </span>
+          : null}
+
+        {/* LangSmith 链接 */}
+        {child.ls_url && (
+          <a
+            href={child.ls_url} target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ color:'var(--sub)', display:'flex', textDecoration:'none', padding:2, borderRadius:4, flexShrink:0 }}
+            title="在 LangSmith 查看"
+          >
+            <ExternalLink size={11}/>
+          </a>
+        )}
+      </div>
+
+      {/* ── 展开内容 ── */}
+      {open && (
+        <div style={{
+          marginLeft: indent + 14,
+          borderLeft:'2px solid var(--border)',
+          paddingLeft:12,
+          marginBottom:4,
+        }}>
+          {loading && (
+            <div style={{ padding:'6px 0', color:'var(--sub)', fontFamily:'var(--mono)', fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
+              <Loader size={12} style={{ animation:'spin .6s linear infinite' }}/> 加载中…
+            </div>
+          )}
+          {err && (
+            <div style={{ padding:'6px 0', color:'var(--err)', fontFamily:'var(--mono)', fontSize:11 }}>
+              {err}
+            </div>
+          )}
+
+          {/* Inputs */}
+          {hasInputs && (
+            <div style={{ ...sD.section, marginTop:6 }}>
+              <div style={sD.sectionTitle}>Inputs</div>
+              <pre style={sD.pre}>{JSON.stringify(run.inputs, null, 2)}</pre>
+            </div>
+          )}
+
+          {/* Outputs */}
+          {hasOutputs && (
+            <div style={{ ...sD.section, marginTop:6 }}>
+              <div style={sD.sectionTitle}>Outputs</div>
+              <pre style={sD.pre}>{JSON.stringify(run.outputs, null, 2)}</pre>
+            </div>
+          )}
+
+          {/* Error */}
+          {hasError && (
+            <div style={{ ...sD.section, marginTop:6, borderColor:'rgba(248,113,113,.3)', background:'rgba(248,113,113,.06)' }}>
+              <div style={{ ...sD.sectionTitle, color:'var(--err)' }}>Error</div>
+              <pre style={{ ...sD.pre, color:'var(--err)' }}>{run.error}</pre>
+            </div>
+          )}
+
+          {/* 孙子链路（递归） */}
+          {grandkids.length > 0 && (
+            <div style={{ ...sD.section, marginTop:6 }}>
+              <div style={sD.sectionTitle}>子链路（{grandkids.length} 步）</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:0, marginTop:6 }}>
+                {grandkids.map((gc, i) => (
+                  <ChildRunRow key={gc.id} child={gc} index={i} depth={depth + 1} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 无内容提示 */}
+          {!loading && !err && !hasInputs && !hasOutputs && !hasError && grandkids.length === 0 && (
+            <div style={{ padding:'6px 0', color:'var(--border2)', fontFamily:'var(--mono)', fontSize:11 }}>
+              无详细数据
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 子组件：展开详情 ──────────────────────────────────
 function RunDetail({ runId }) {
   const [detail,  setDetail]  = useState(null)
@@ -113,6 +285,8 @@ function RunDetail({ runId }) {
 
   useEffect(() => {
     setLoading(true)
+    setErr('')
+    setDetail(null)
     apiGetTrace(runId)
       .then(d => { setDetail(d); setLoading(false) })
       .catch(e => { setErr(e.message); setLoading(false) })
@@ -122,7 +296,21 @@ function RunDetail({ runId }) {
   if (err)     return <div style={sD.wrap}><span style={{ color:'var(--err)', fontFamily:'var(--mono)', fontSize:12 }}>{err}</span></div>
   if (!detail) return null
 
-  const { run, children = [] } = detail
+  // ── [Fix 1] 防御：detail 可能直接是 run 对象，或含 error 字段 ──
+  if (detail.error) {
+    return (
+      <div style={sD.wrap}>
+        <span style={{ color:'var(--err)', fontFamily:'var(--mono)', fontSize:12 }}>
+          {detail.error}
+        </span>
+      </div>
+    )
+  }
+
+  const run      = detail.run ?? detail   // 兼容 { run, children } 和裸 run 两种格式
+  const children = detail.children ?? []
+
+  if (!run) return null
 
   return (
     <div style={sD.wrap}>
@@ -147,20 +335,9 @@ function RunDetail({ runId }) {
       {children.length > 0 && (
         <div style={sD.section}>
           <div style={sD.sectionTitle}>执行链路（{children.length} 步）</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:6 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:0, marginTop:6 }}>
             {children.map((c, i) => (
-              <div key={c.id} style={sD.childRow}>
-                <span style={{ color:'var(--border2)', fontFamily:'var(--mono)', fontSize:10, flexShrink:0 }}>
-                  {String(i+1).padStart(2,'0')}
-                </span>
-                <span style={{ ...sD.childType, color: RUN_TYPE_COLOR[c.run_type] ?? 'var(--sub)' }}>
-                  {c.run_type}
-                </span>
-                <span style={sD.childName}>{c.name}</span>
-                <span style={sD.childMs}>{c.latency_ms != null ? fmtMs(c.latency_ms) : '—'}</span>
-                {c.token_usage?.total ? <span style={sD.childTok}>{c.token_usage.total} tok</span> : null}
-                <span style={{ marginLeft:'auto' }}>{STATUS_ICON[c.status] ?? STATUS_ICON.pending}</span>
-              </div>
+              <ChildRunRow key={c.id} child={c} index={i} depth={0} />
             ))}
           </div>
         </div>
@@ -187,6 +364,8 @@ export default function TracePanel() {
       if (res.error) { setErr(res.error); setLoading(false); return }
       setRuns(prev => append ? [...prev, ...res.runs] : res.runs)
       setCursor(res.cursor ?? '')
+      console.log('cursor:', res.cursor)   // ← 加这行
+      console.log('runs count:', res.runs.length)  // ← 顺便看看返回了几条
       if (res.project) setProject(res.project)   // ← 接收项目名
     } catch (e) {
       setErr(e.message)
@@ -272,8 +451,7 @@ export default function TracePanel() {
           <span style={{ width:100 }}>名称</span>
           <span style={{ flex:'1 1 160px', minWidth:120 }}>Input</span>
           <span style={{ flex:'1 1 160px', minWidth:120 }}>Output</span>
-          <span style={{ width:110 }}>Error</span>
-          <span style={{ width:80 }}>开始</span>
+          <span style={{ width:148 }}>开始时间</span>
           <span style={{ width:60 }}>耗时</span>
           <span style={{ width:72 }}>Token</span>
           <span style={{ width:20 }}/>
