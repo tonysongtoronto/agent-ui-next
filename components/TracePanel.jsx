@@ -350,48 +350,62 @@ export default function TracePanel() {
   const [project,  setProject]  = useState('')
   const [loading,  setLoading]  = useState(false)
   const [err,      setErr]      = useState('')
-  const [hasMore,  setHasMore]  = useState(false)   // ← 替换 cursor
-  const [offset,   setOffset]   = useState(0)        // ← offset 分页
+  const [hasMore,  setHasMore]  = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [filter,   setFilter]   = useState('')
   const [limit,    setLimit]    = useState(20)
 
-  // 用 ref 持有最新 offset，避免 useCallback 闭包陷阱
-  const offsetRef = useRef(0)
+  // 所有分页状态全放 ref，彻底避免闭包陷阱
+  const cursorRef  = useRef(null)   // start_time ISO string，null = 第一页
+  const filterRef  = useRef('')
+  const limitRef   = useRef(20)
+  const loadingRef = useRef(false)
 
   const load = useCallback(async (append = false) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
     setLoading(true); setErr('')
-    const currentOffset = append ? offsetRef.current : 0
+
+    const cursor = append ? cursorRef.current : null
+    if (!append) cursorRef.current = null
+
     try {
-      const res = await apiListTraces({ limit, filter, offset: currentOffset })
-      if (res.error) { setErr(res.error); setLoading(false); return }
+      const res = await apiListTraces({
+        limit:  limitRef.current,
+        filter: filterRef.current,
+        cursor,
+      })
+      if (res.error) { setErr(res.error); return }
       setRuns(prev => append ? [...prev, ...res.runs] : res.runs)
-      const nextOff = currentOffset + res.runs.length
-      offsetRef.current = nextOff
-      setOffset(nextOff)
-      setHasMore(res.hasMore)          // ← 用 hasMore 控制按钮显示
+      cursorRef.current = res.nextCursor ?? null
+      setHasMore(res.hasMore ?? false)
       if (res.project) setProject(res.project)
     } catch (e) {
       setErr(e.message)
     } finally {
+      loadingRef.current = false
       setLoading(false)
     }
-  }, [limit, filter])   // ← 不再依赖 offset/cursor，避免无限重建
+  }, [])   // 永远不重建
 
-  // 初始加载
-  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  // 初始加载（只跑一次）
+  useEffect(() => { load(false) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // filter / limit 变化时重置并重新加载
-  useEffect(() => {
-    offsetRef.current = 0
-    setOffset(0)
+  const handleFilterChange = (val) => {
+    filterRef.current = val
+    setFilter(val)
+  }
+
+  const handleLimitChange = (val) => {
+    limitRef.current  = val
+    cursorRef.current = null
+    setLimit(val)
     setHasMore(false)
     load(false)
-  }, [filter, limit])   // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   const refresh = () => {
-    offsetRef.current = 0
-    setOffset(0)
+    cursorRef.current = null
     setHasMore(false)
     load(false)
   }
@@ -434,13 +448,13 @@ export default function TracePanel() {
         <div style={s.filterRow}>
           <input
             value={filter}
-            onChange={e => setFilter(e.target.value)}
+            onChange={e => handleFilterChange(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && refresh()}
             placeholder="过滤（如：eq(status, 'error')）"
             style={s.filterInput}
           />
-          <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={s.select}>
-            {[10, 20, 50].map(n => <option key={n} value={n}>{n} 条</option>)}
+          <select value={limit} onChange={e => handleLimitChange(Number(e.target.value))} style={s.select}>
+            {[1,3,5,10, 20, 50].map(n => <option key={n} value={n}>{n} 条</option>)}
           </select>
           <button onClick={refresh} disabled={loading} style={s.refreshBtn}>
             <RefreshCw size={13} style={{ animation: loading ? 'spin .6s linear infinite' : 'none' }}/>
