@@ -27,7 +27,9 @@ function PromptCard({ prompt, onDelete, onUpdate }) {
     try {
       await onUpdate(prompt.id, { title: title.trim(), content: content.trim(), tags: tags.trim() })
       setEditing(false)
-    } finally { setSaving(false) }
+    } finally { 
+      setSaving(false) 
+    }
   }
 
   const cancel = () => {
@@ -104,14 +106,18 @@ export default function PromptPanel() {
   const [search,   setSearch]   = useState('')
   const [log,      setLog]      = useState('')
 
+
   const load = async () => {
     setLoading(true)
+   
     try {
       const res = await apiListPrompts()
       setPrompts(res.prompts ?? [])
     } catch (e) { setLog(`加载失败：${e.message}`) }
     finally { setLoading(false) }
   }
+
+  
 
   useEffect(() => { load() }, [])
 
@@ -206,7 +212,7 @@ export default function PromptPanel() {
         <div style={s.hint}>加载中…</div>
       ) : filtered.length === 0 ? (
         <div style={s.hint}>
-          {prompts.length === 0
+          {prompts.length !== 0
             ? '还没有收藏的 Prompt，点击「新增」开始添加。'
             : '没有匹配的结果'}
         </div>

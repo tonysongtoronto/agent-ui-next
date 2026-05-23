@@ -176,10 +176,9 @@ export default function SessionPanel() {
               <div style={sty.groupLabel}>📌 置顶</div>
               <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                 {pinned.map(s => <SessionRow key={s.thread_id} s={s}
-                  onPin={updateSession.bind(null, s.thread_id, { pinned: !s.pinned })}
+                  onPin={(tid, p) => updateSession(tid, { pinned: p })}
                   onDelete={clearSession} onUpdate={updateSession}
-                  onCopy={copyTid} copied={copied}
-                  onPin={(tid, p) => updateSession(tid, { pinned: p })}/>)}
+                  onCopy={copyTid} copied={copied}/>)}
               </div>
             </div>
           )}

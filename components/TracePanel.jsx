@@ -327,7 +327,7 @@ function RunDetail({ runId }) {
       {run.error && (
         <div style={{ ...sD.section, borderColor:'rgba(248,113,113,.3)', background:'rgba(248,113,113,.06)' }}>
           <div style={{ ...sD.sectionTitle, color:'var(--err)' }}>Error</div>
-          <pre style={{ ...sD.pre, color:'var(--err)' }}>{run.error}</pre>
+          <pre style={{ ...sD.pre, color:'var(--err)' }}>{run.error} </pre>
         </div>
       )}
       {children.length > 0 && (
@@ -362,6 +362,7 @@ export default function TracePanel() {
   const loadingRef = useRef(false)
 
   const load = useCallback(async (append = false) => {
+  
     if (loadingRef.current) return
     loadingRef.current = true
     setLoading(true); setErr('')
@@ -391,9 +392,18 @@ export default function TracePanel() {
   // 初始加载（只跑一次）
   useEffect(() => { load(false) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 校验是否为合法的 LangSmith filter 语法（必须以函数调用开头）
+  const isValidFilter = (val) => {
+    if (!val || !val.trim()) return true   // 空 = 不过滤，合法
+    return /^\s*(eq|neq|gt|gte|lt|lte|and|or|not|has|search|in|nin|exists)\s*\(/.test(val.trim())
+  }
+
   const handleFilterChange = (val) => {
-    filterRef.current = val
-    setFilter(val)
+    setFilter(val)   // 始终更新显示
+    // 只有合法语法才更新 ref（ref 决定实际发给 API 的值）
+    if (isValidFilter(val)) {
+      filterRef.current = val
+    }
   }
 
   const handleLimitChange = (val) => {
@@ -449,9 +459,13 @@ export default function TracePanel() {
           <input
             value={filter}
             onChange={e => handleFilterChange(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && refresh()}
-            placeholder="过滤（如：eq(status, 'error')）"
-            style={s.filterInput}
+            onKeyDown={e => e.key === 'Enter' && isValidFilter(filter) && refresh()}
+            placeholder="过滤语法：eq(status,'error') / gt(latency,5000)"
+            autoComplete="off"
+            style={{
+              ...s.filterInput,
+              borderColor: filter && !isValidFilter(filter) ? 'var(--err)' : undefined,
+            }}
           />
           <select value={limit} onChange={e => handleLimitChange(Number(e.target.value))} style={s.select}>
             {[1,3,5,10, 20, 50].map(n => <option key={n} value={n}>{n} 条</option>)}
@@ -511,7 +525,7 @@ export default function TracePanel() {
 
           {loading && (
             <div style={s.loadingRow}>
-              <Loader size={14} style={{ animation:'spin .6s linear infinite' }}/> 加载中…
+              <Loader size={14} style={{ animation:'spin .6s linear infinite' }}/> 加载中
             </div>
           )}
         </div>

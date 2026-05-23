@@ -9,7 +9,7 @@ export async function GET() {
     const prompts = await dbListPrompts()
     return Response.json({ prompts })
   } catch (err) {
-    return Response.json({ error: err.message }, { status: 500 })
+    return Response.json({ error: err.message }, )
   }
 }
 
