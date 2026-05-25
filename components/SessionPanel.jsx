@@ -138,7 +138,7 @@ export default function SessionPanel() {
   const unpinned = sessions.filter(s => !s.pinned)
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:18 }} className="fade-up">
+    <div style={{ display:'flex', flexDirection:'column', gap:18, overflowY:'auto', maxHeight:'100vh', paddingBottom:24, paddingRight:2 }} className="fade-up">
       {/* 新建 */}
       <div style={sty.card}>
         <div style={sty.cardTitle}>新建会话</div>
@@ -172,7 +172,7 @@ export default function SessionPanel() {
             </button>
           </div>
 
-          <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
             {pinned.length > 0 && (
               <div style={{ marginBottom:10 }}>
                 <div style={sty.groupLabel}>📌 置顶</div>
@@ -206,7 +206,7 @@ export default function SessionPanel() {
             <div style={sty.cardTitle}>操作日志</div>
             <button onClick={()=>setLog([])} style={sty.iconBtn}><Trash2 size={12}/></button>
           </div>
-          <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:4 }}>
+          <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:4, maxHeight:180, overflowY:'auto', paddingRight:4 }}>
             {log.map((l, i) => (
               <div key={i} style={{ fontFamily:'var(--mono)', fontSize:11.5, display:'flex', gap:8,
                 color: l.type==='ok'?'var(--ok)':l.type==='err'?'var(--err)':'var(--warn)' }}>
