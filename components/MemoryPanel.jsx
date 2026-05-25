@@ -23,7 +23,7 @@ export default function MemoryPanel() {
       setItems(res.items || {})
     } catch (e) {
       addLog('err', `✗ 加载失败：${e.message}`)
-    } finally { setLoading(false) }
+    } finally { setLoading(false) } // 修正：已将 military 改回正确的 finally
   }
 
   useEffect(() => { load() }, [])
@@ -55,6 +55,23 @@ export default function MemoryPanel() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:18 }} className="fade-up">
+
+      {/* 注入科技感微窄滚动条样式，完美融入暗黑 UI */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: var(--border, #333);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: var(--sub, #555);
+        }
+      `}} />
 
       {/* Header stat */}
       <div style={styles.statCard}>
@@ -95,7 +112,7 @@ export default function MemoryPanel() {
         </div>
       </div>
 
-      {/* Memory list */}
+      {/* Memory list - 限制最大高度并引入自定义滚动条 */}
       <div style={styles.card}>
         <div style={styles.cardTitle}>当前全局记忆 · system 命名空间</div>
         {count === 0
@@ -103,7 +120,7 @@ export default function MemoryPanel() {
               暂无记忆
             </div>
           : (
-            <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8 }}>
+            <div className="custom-scrollbar" style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8, maxHeight: 240, overflowY: 'auto', paddingRight: 6 }}>
               {Object.entries(items).map(([k, v]) => {
                 const display = typeof v === 'object' ? (v.value ?? JSON.stringify(v)) : v
                 return (
@@ -123,14 +140,14 @@ export default function MemoryPanel() {
         }
       </div>
 
-      {/* Log */}
+      {/* Log - 限制最大高度并引入自定义滚动条 */}
       {log.length > 0 && (
         <div style={styles.card}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <div style={styles.cardTitle}>操作日志</div>
             <button onClick={()=>setLog([])} style={styles.delBtn}><Trash2 size={12}/></button>
           </div>
-          <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:3 }}>
+          <div className="custom-scrollbar" style={{ marginTop:10, display:'flex', flexDirection:'column', gap:4, maxHeight: 140, overflowY: 'auto', paddingRight: 6 }}>
             {log.map((l, i) => (
               <div key={i} style={{ fontFamily:'var(--mono)', fontSize:11.5, display:'flex', gap:8,
                 color: l.type==='ok'?'var(--ok)':'var(--err)' }}>
