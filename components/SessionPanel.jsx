@@ -54,7 +54,8 @@ function SessionRow({ s, onPin, onDelete, onUpdate, onCopy, copied }) {
         )}
       </div>
       {!editing && (
-        <div style={sR.actions}>
+         <div style={sR.actions}>
+  
           <button onClick={()=>onCopy(s.thread_id)} style={sR.iconBtn} title="复制">
             {copied===s.thread_id ? <Check size={13} color="var(--ok)"/> : <Copy size={13}/>}
           </button>
@@ -171,28 +172,30 @@ export default function SessionPanel() {
             </button>
           </div>
 
-          {pinned.length > 0 && (
-            <div style={{ marginBottom:10 }}>
-              <div style={sty.groupLabel}>📌 置顶</div>
-              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                {pinned.map(s => <SessionRow key={s.thread_id} s={s}
-                  onPin={(tid, p) => updateSession(tid, { pinned: p })}
-                  onDelete={clearSession} onUpdate={updateSession}
-                  onCopy={copyTid} copied={copied}/>)}
+          <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+            {pinned.length > 0 && (
+              <div style={{ marginBottom:10 }}>
+                <div style={sty.groupLabel}>📌 置顶</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  {pinned.map(s => <SessionRow key={s.thread_id} s={s}
+                    onPin={(tid, p) => updateSession(tid, { pinned: p })}
+                    onDelete={clearSession} onUpdate={updateSession}
+                    onCopy={copyTid} copied={copied}/>)}
+                </div>
               </div>
-            </div>
-          )}
-          {unpinned.length > 0 && (
-            <div>
-              {pinned.length > 0 && <div style={sty.groupLabel}>其他</div>}
-              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                {unpinned.map(s => <SessionRow key={s.thread_id} s={s}
-                  onPin={(tid, p) => updateSession(tid, { pinned: p })}
-                  onDelete={clearSession} onUpdate={updateSession}
-                  onCopy={copyTid} copied={copied}/>)}
+            )}
+            {unpinned.length > 0 && (
+              <div>
+                {pinned.length > 0 && <div style={sty.groupLabel}>其他</div>}
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  {unpinned.map(s => <SessionRow key={s.thread_id} s={s}
+                    onPin={(tid, p) => updateSession(tid, { pinned: p })}
+                    onDelete={clearSession} onUpdate={updateSession}
+                    onCopy={copyTid} copied={copied}/>)}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
