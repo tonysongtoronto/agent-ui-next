@@ -3,7 +3,8 @@
 // 变化：顶部加了 'use client'，import 路径改为 '../lib/client'
 import { useState, useEffect } from 'react'
 import { RefreshCw, Plus, Trash2, Database } from 'lucide-react'
-import { apiListMemory, apiPutMemory, apiDeleteMemory } from '../lib/client.js'
+import { apiListMemory, apiPutMemory, apiDeleteMemory,
+         apiListLogs, apiAddLog, apiClearLogs } from '../lib/client.js'
 
 export default function MemoryPanel() {
   const [items,   setItems]   = useState({})
@@ -13,8 +14,33 @@ export default function MemoryPanel() {
   const [saving,  setSaving]  = useState(false)
   const [log,     setLog]     = useState([])
 
-  const addLog = (type, msg) =>
-    setLog(l => [{ type, msg, ts: new Date().toLocaleTimeString() }, ...l].slice(0, 20))
+
+  // 从 ui.db 读日志
+  const loadLogs = async () => {
+    try {
+      const res = await apiListLogs()
+      // 每条记录形如 { type, msg, created_at }
+      // 把 created_at 格式化成本地时间字符串，对齐原来的 ts 字段
+      setLog((res.logs ?? []).map(l => ({
+        type: l.type,
+        msg:  l.msg,
+        ts:   new Date(l.created_at).toLocaleTimeString(),
+      })))
+    } catch {
+      // 日志加载失败静默处理，不影响主功能
+    }
+  }
+
+  // 写一条日志到 ui.db，同时刷新本地 state
+  const addLog = async (type, msg) => {
+    try {
+      await apiAddLog(type, msg)
+      await loadLogs()
+    } catch {
+      // fallback：写 DB 失败时至少在内存里保留最新这条
+      setLog(l => [{ type, msg, ts: new Date().toLocaleTimeString() }, ...l].slice(0, 100))
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -23,10 +49,13 @@ export default function MemoryPanel() {
       setItems(res.items || {})
     } catch (e) {
       addLog('err', `✗ 加载失败：${e.message}`)
-    } finally { setLoading(false) } // 修正：已将 military 改回正确的 finally
+    } finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    loadLogs()
+  }, [])
 
   const save = async () => {
     if (!newKey.trim() || !newVal.trim()) return
@@ -48,6 +77,16 @@ export default function MemoryPanel() {
       await load()
     } catch (e) {
       addLog('err', `✗ 删除失败：${e.message}`)
+    }
+  }
+
+  // 清空日志：调 DELETE /api/ui/logs，再刷新 state
+  const clearLogs = async () => {
+    try {
+      await apiClearLogs()
+      setLog([])
+    } catch {
+      setLog([])
     }
   }
 
@@ -140,12 +179,12 @@ export default function MemoryPanel() {
         }
       </div>
 
-      {/* Log - 限制最大高度并引入自定义滚动条 */}
+      {/* Log - 持久化自 ui.db，限制最大高度并引入自定义滚动条 */}
       {log.length > 0 && (
         <div style={styles.card}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <div style={styles.cardTitle}>操作日志</div>
-            <button onClick={()=>setLog([])} style={styles.delBtn}><Trash2 size={12}/></button>
+            <button onClick={clearLogs} style={styles.delBtn}><Trash2 size={12}/></button>
           </div>
           <div className="custom-scrollbar" style={{ marginTop:10, display:'flex', flexDirection:'column', gap:4, maxHeight: 140, overflowY: 'auto', paddingRight: 6 }}>
             {log.map((l, i) => (

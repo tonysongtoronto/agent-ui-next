@@ -7,5 +7,6 @@ import { proxyJSON } from '../../../../lib/proxy'
 
 export async function DELETE(request, { params }) {
   const { key } = await params
-  return proxyJSON(`/memory/${encodeURIComponent(key)}`, { method: 'DELETE' })
+  return proxyJSON(`/memory/${encodeURIComponent(key)}`, 
+  { method: 'DELETE' })
 }
