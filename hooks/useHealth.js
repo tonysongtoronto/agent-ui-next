@@ -17,6 +17,7 @@ export function useHealth(autoRefreshMs = 15000) {
     setLoading(true)
     try {
       const res = await apiHealth()
+      console.log('health check res:', res) 
       setData(res)
       setStatus(res.status)
     } catch {
