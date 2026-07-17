@@ -1,6 +1,7 @@
 'use client'
 // components/BatchPanel.jsx — Next.js 版本
 // 变化：顶部加了 'use client'，import 路径改为 '../lib/client'
+// 2024 修改：支持"暂停"状态 + 再次运行时从暂停处继续（顺序/并行都支持）
 import { useState, useRef } from 'react'
 import { marked } from 'marked'
 import { Plus, Play, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
@@ -15,14 +16,15 @@ const PRESETS = [
 
 function ResultCard({ item, idx }) {
   const [open, setOpen] = useState(true)
-  const statusColor = { pending:'var(--sub)', running:'var(--warn)', done:'var(--ok)', error:'var(--err)' }
-  const statusLabel = { pending:'等待中', running:'运行中', done:'完成', error:'失败' }
+  const statusColor = { pending:'var(--sub)', running:'var(--warn)', done:'var(--ok)', error:'var(--err)', paused:'var(--sub)' }
+  const statusLabel = { pending:'等待中', running:'运行中', done:'完成', error:'失败', paused:'已暂停' }
 
   return (
     <div style={{
       ...styles.card,
       borderColor: item.status === 'error' ? 'rgba(248,113,113,.3)'
                  : item.status === 'done'  ? 'rgba(52,211,153,.2)'
+                 : item.status === 'paused' ? 'rgba(148,163,184,.3)'
                  : 'var(--border)',
     }} className="fade-up">
       <div style={styles.cardHead} onClick={() => setOpen(v=>!v)}>
@@ -36,6 +38,7 @@ function ResultCard({ item, idx }) {
         <span style={{ fontFamily:'var(--mono)', fontSize:11,
           color: statusColor[item.status], whiteSpace:'nowrap' }}>
           {item.status === 'running' && <span style={{ animation:'spin .6s linear infinite', display:'inline-block', marginRight:4 }}>◌</span>}
+          {item.status === 'paused' && <span style={{ display:'inline-block', marginRight:4 }}>⏸</span>}
           {statusLabel[item.status]}
         </span>
         {item.ms && <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--sub)', whiteSpace:'nowrap' }}>{item.ms}ms</span>}
@@ -71,6 +74,16 @@ export default function BatchPanel() {
   const stop = () => {
     abortRef.current.forEach(c => c?.abort())
     setRunning(false)
+    // 把还没跑完的项目（running / pending）标记为"已暂停"
+    // 这次 setResults 是同步排在 stop() 这次事件处理里的，
+    // 一定先于 abort() 触发的异步 onError/onDone 回调生效，
+    // 所以回调里只要检查当前状态是不是 paused 就能判断是否被主动打断，
+    // 不需要额外用一个 ref/Set 去"提前打标签"。
+    setResults(r => r.map(item =>
+      (item.status === 'running' || item.status === 'pending')
+        ? { ...item, status: 'paused' }
+        : item
+    ))
   }
 
   const run = async () => {
@@ -79,12 +92,19 @@ export default function BatchPanel() {
     setRunning(true)
     abortRef.current = []
 
-    const init = qs.map(q => ({ question:q, status:'pending', answer:'', ms:null }))
-    setResults(init)
+    // 判断是"续跑"还是"全新开始"：
+    // 只要 results 数量和当前用例数一致，且已经有过进度（不是全部还是 pending），
+    // 就视为续跑——保留 done 的结果，其余（pending/paused/error）都重新标记为 pending 待跑
+    const canResume = results.length === qs.length && results.some(r => r.status !== 'pending')
+    const initResults = canResume
+      ? results.map(r => r.status === 'done' ? r : { question: r.question, status: 'pending', answer: '', ms: null })
+      : qs.map(q => ({ question: q, status: 'pending', answer: '', ms: null }))
+
+    setResults(initResults)
 
     const runOne = (q, i) => new Promise(resolve => {
       const t0 = Date.now()
-      setResults(r => { const c=[...r]; c[i]={...c[i],status:'running'}; return c })
+      setResults(r => { const c=[...r]; c[i]={...c[i],status:'running',answer:''}; return c })
 
       const ctrl = apiChatStream({
         question: q, thread_id: '',
@@ -92,28 +112,43 @@ export default function BatchPanel() {
           setResults(r => { const c=[...r]; c[i]={...c[i],answer:full}; return c })
         },
         onDone: () => {
-          setResults(r => { const c=[...r]; c[i]={...c[i],status:'done',ms:Date.now()-t0}; return c })
+          setResults(r => {
+            if (r[i].status === 'paused') return r // 已被暂停打断，不覆盖
+            const c=[...r]; c[i]={...c[i],status:'done',ms:Date.now()-t0}; return c
+          })
           resolve()
         },
         onError: (err) => {
-          setResults(r => { const c=[...r]; c[i]={...c[i],status:'error',answer:err,ms:Date.now()-t0}; return c })
+          setResults(r => {
+            if (r[i].status === 'paused') return r // 已被暂停打断，不覆盖
+            const c=[...r]; c[i]={...c[i],status:'error',answer:err,ms:Date.now()-t0}; return c
+          })
           resolve()
         },
       })
       abortRef.current[i] = ctrl
     })
 
+    // 只跑还没完成（不是 done）的 index，done 的直接跳过
+    const pendingIndices = initResults
+      .map((r, i) => ({ status: r.status, i }))
+      .filter(x => x.status !== 'done')
+      .map(x => x.i)
+
     if (mode === 'seq') {
-      for (let i = 0; i < qs.length; i++) await runOne(qs[i], i)
+      for (const i of pendingIndices) await runOne(qs[i], i)
     } else {
-      for (let i = 0; i < qs.length; i += concur)
-        await Promise.all(qs.slice(i, i+concur).map((q,j) => runOne(q, i+j)))
+      for (let k = 0; k < pendingIndices.length; k += concur) {
+        const batch = pendingIndices.slice(k, k + concur)
+        await Promise.all(batch.map(i => runOne(qs[i], i)))
+      }
     }
     setRunning(false)
   }
 
   const done   = results.filter(r=>r.status==='done').length
   const failed = results.filter(r=>r.status==='error').length
+  const hasPaused = results.some(r => r.status === 'paused')
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -143,7 +178,7 @@ export default function BatchPanel() {
             {running
               ? <button onClick={stop} style={styles.stopBtn}>⏹ 停止</button>
               : <button onClick={run} disabled={!cases.some(q=>q.trim())} style={styles.runBtn}>
-                  <Play size={13}/> 运行全部 
+                  <Play size={13}/> {hasPaused ? '继续' : '运行全部'}
                 </button>
             }
             <button onClick={addCase} style={styles.ghostBtn}><Plus size={13}/> 添加</button>
