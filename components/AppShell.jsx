@@ -4,21 +4,23 @@
 
 import { useState } from 'react'
 import { Activity, MessageSquare, Layers, GitBranch, Database,
-         Settings, Zap, GitCommit, BookMarked } from 'lucide-react'
+         Settings, Zap, GitCommit, BookMarked, Wrench } from 'lucide-react'
 import { useHealth } from '../hooks/useHealth.js'
 import { getBaseUrl, setBaseUrl } from '../lib/client.js'
 
-import HealthPanel    from './HealthPanel.jsx'
-import ChatPanel      from './ChatPanel.jsx'
-import BatchPanel     from './BatchPanel.jsx'
-import MultiTurnPanel from './MultiTurnPanel.jsx'
-import SessionPanel   from './SessionPanel.jsx'
-import MemoryPanel    from './MemoryPanel.jsx'
-import TracePanel     from './TracePanel.jsx'
-import PromptPanel    from './PromptPanel.jsx'
+import HealthPanel     from './HealthPanel.jsx'
+import AgentToolsPanel from './AgentToolsPanel.jsx'
+import ChatPanel       from './ChatPanel.jsx'
+import BatchPanel      from './BatchPanel.jsx'
+import MultiTurnPanel  from './MultiTurnPanel.jsx'
+import SessionPanel    from './SessionPanel.jsx'
+import MemoryPanel     from './MemoryPanel.jsx'
+import TracePanel      from './TracePanel.jsx'
+import PromptPanel     from './PromptPanel.jsx'
 
 const NAV = [
   { id:'health',    label:'Health',      icon: Activity,     section:'监控' },
+  { id:'tools',     label:'Agent Tools', icon: Wrench,       section:'监控' },
   { id:'traces',    label:'Traces',      icon: GitCommit,    section:'监控' },
   { id:'chat',      label:'Chat',        icon: MessageSquare,section:'对话' },
   { id:'batch',     label:'Batch Test',  icon: Layers,       section:'对话' },
@@ -50,6 +52,7 @@ export default function AppShell() {
 
   const panels = {
     health:    <HealthPanel />,
+    tools:     <AgentToolsPanel />,
     traces:    <TracePanel />,
     chat:      <ChatPanel />,
     batch:     <BatchPanel />,
@@ -61,6 +64,7 @@ export default function AppShell() {
 
   const panelMeta = {
     health:    { title:'Health Check',    desc:'服务状态 · MCP 工具 · 运行时信息' },
+    tools:     { title:'Agent Tools',     desc:'已注册 Agent · 各自挂载的 MCP 工具一览' },
     traces:    { title:'Traces',          desc:'LangSmith 运行记录 · Token 用量 · 执行链路' },
     chat:      { title:'Chat',            desc:'单次对话 · 流式输出 · 多轮记忆' },
     batch:     { title:'Batch Test',      desc:'批量测试 · 顺序 / 并行执行' },

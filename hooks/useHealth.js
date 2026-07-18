@@ -12,12 +12,13 @@ export function useHealth(autoRefreshMs = 15000) {
   const [data,    setData]    = useState(null)
   const [status,  setStatus]  = useState('idle') // idle | ok | degraded | initializing | error
   const [loading, setLoading] = useState(false)
-
+ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
   const check = useCallback(async () => {
     setLoading(true)
+    // await sleep(2000)   
     try {
       const res = await apiHealth()
-      console.log('health check res:\n' + JSON.stringify(res, null, 2))
+     // console.log('health check res:\n' + JSON.stringify(res, null, 2))
       setData(res)
       setStatus(res.status)
     } catch {
