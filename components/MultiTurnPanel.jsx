@@ -64,7 +64,7 @@ function TimelineStep({ type, label, content, ms, isStreaming }) {
           background:dotStyle.bg, border:`1px solid ${dotStyle.border}`, color:dotStyle.color,
           fontFamily:'var(--mono)',
         }}>{dotStyle.label}</div>
-        <div style={{ flex:1, width:1, background:'var(--border)', marginTop:4 }} />
+        <div style={{ flex:1, width:1, background:'var(--border)', marginTop:1 }} />
       </div>
 
       {/* Content */}
