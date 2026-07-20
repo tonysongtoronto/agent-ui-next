@@ -1,9 +1,22 @@
 'use client'
 // components/MultiTurnPanel.jsx — Next.js 版本
 // 变化：顶部加了 'use client'，import 路径改为 '../lib/client'
+//
+// 【暂停 / 恢复】
+// - apiChatStream() 返回一个 AbortController，所以暂停是"真暂停"：
+//   点击暂停会立刻 abort 当前正在流式输出的这一轮请求。
+// - client.js 里 abort 触发的是 AbortError，会被 catch 吞掉，
+//   既不会调用 onDone 也不会调用 onError —— 所以 run() 循环里
+//   await 的 Promise 永远不会被 resolve。为了不卡死循环，
+//   requestPause() 会在 abort 之后手动 resolve 这个 pending promise。
+// - 被打断的这一轮（用户消息 + AI 占位气泡）会从 timeline 里撤回，
+//   记录下"下次该从第几轮开始"（resumeIndexRef）。
+// - 之前已经跑完的轮次（timeline + threadId）完全不动。
+// - 点"继续"时用 run(true)：不清空 timeline / threadId，
+//   从 resumeIndexRef 记录的位置重新完整地跑这一轮。
 import { useState, useRef, useEffect } from 'react'
 import { marked } from 'marked'
-import { Plus, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { Plus, Play, Pause, RotateCcw, Trash2 } from 'lucide-react'
 import { apiChatStream } from '../lib/client.js'
 
 const EXAMPLE_TURNS = [
@@ -100,9 +113,17 @@ export default function MultiTurnPanel() {
   const [timeline, setTimeline] = useState([])
   const [threadId, setThreadId] = useState(null)
   const [running,  setRunning]  = useState(false)
+  const [paused,   setPaused]   = useState(false)   // 已暂停，可以"继续"
   const [delay,    setDelay]    = useState(0)
+
   const bottomRef   = useRef(null)
   const timelineRef = useRef([])  // 同步跟踪最新 timeline，避免 state 闭包问题
+
+  const pauseRequestedRef  = useRef(false) // 用户点了"暂停"（在 loop 里同步读取，不受 state 异步影响）
+  const resumeIndexRef     = useRef(0)     // 下次继续时，应该从 validTurns 的第几个开始
+  const threadRef          = useRef(null)  // 跨 run() 调用保留 thread_id（用于恢复）
+  const activeControllerRef = useRef(null) // 当前这一轮 apiChatStream 返回的 AbortController
+  const pendingResolveRef   = useRef(null) // 当前 await 的 Promise 的 resolve，暂停时用来手动解除阻塞
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior:'smooth' })
@@ -121,7 +142,36 @@ export default function MultiTurnPanel() {
   const delTurn     = (i) => setTurns(t => t.filter((_,j)=>j!==i))
   const setTurn     = (i, v) => setTurns(t => t.map((x,j)=>j===i?v:x))
   const loadExample = () => setTurns(EXAMPLE_TURNS)
-  const reset       = () => { updateTimeline([]); setThreadId(null) }
+
+  const reset = () => {
+    activeControllerRef.current?.abort()
+    activeControllerRef.current = null
+    pendingResolveRef.current = null
+    pauseRequestedRef.current = false
+    resumeIndexRef.current = 0
+    threadRef.current = null
+
+    updateTimeline([])
+    setThreadId(null)
+    setPaused(false)
+  }
+
+  // 点击"暂停"：
+  // 1) 打标记，供 run() 循环检查
+  // 2) abort 掉正在进行的流式请求（如果有）
+  // 3) 手动 resolve 掉 run() 里正在 await 的 promise，避免循环卡死
+  //    （abort 触发的是 AbortError，client.js 会吞掉它，不会调用 onDone/onError）
+  const requestPause = () => {
+    if (!running) return
+    pauseRequestedRef.current = true
+    activeControllerRef.current?.abort()
+    activeControllerRef.current = null
+    if (pendingResolveRef.current) {
+      const resolve = pendingResolveRef.current
+      pendingResolveRef.current = null
+      resolve()
+    }
+  }
 
   const saveTimeline = async () => {
     const data = timelineRef.current  // 直接读 ref，拿到最新数据
@@ -133,25 +183,51 @@ export default function MultiTurnPanel() {
     })
   }
 
-  const run = async () => {
+  // resume=false：全新运行，清空之前的结果
+  // resume=true ：从 resumeIndexRef 记录的位置继续，保留 timeline / threadId
+  const run = async (resume = false) => {
     const validTurns = turns.map(t=>t.trim()).filter(Boolean)
     if (!validTurns.length || running) return
 
     setRunning(true)
-    updateTimeline([])
-    setThreadId(null)
-    let currentThread = null
-    let allOk = true
+    setPaused(false)
+    pauseRequestedRef.current = false
 
+    let currentThread
+    let startIndex
+
+    if (resume) {
+      currentThread = threadRef.current
+      startIndex = resumeIndexRef.current
+    } else {
+      updateTimeline([])
+      setThreadId(null)
+      threadRef.current = null
+      currentThread = null
+      startIndex = 0
+    }
+
+    let allOk = true
     const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-    for (let i = 0; i < validTurns.length; i++) {
+    for (let i = startIndex; i < validTurns.length; i++) {
+      // 轮次开始前检查：可能是上一次循环末尾之后、这次迭代开始前被暂停的
+
       const q = validTurns[i]
 
       // Add user message
       updateTimeline(t => [...t, { type:'user', label:`第 ${i+1} 轮 · 用户`, content:q }])
 
-      if (i > 0 && delay > 0) await sleep(delay)
+      if (i > startIndex && delay > 0) await sleep(delay)
+
+      // 轮间延迟期间被暂停：撤回刚加的用户消息（这轮还没真正开始问）
+      if (pauseRequestedRef.current) {
+        updateTimeline(t => t.slice(0, -1))
+        resumeIndexRef.current = i
+        setPaused(true)
+        setRunning(false)
+        return
+      }
 
       // Add AI placeholder
       updateTimeline(t => [...t, { type:'ai', label:`第 ${i+1} 轮 · AI 响应`, content:'',
@@ -159,7 +235,8 @@ export default function MultiTurnPanel() {
 
       const t0 = Date.now()
       await new Promise(resolve => {
-        apiChatStream({
+        pendingResolveRef.current = resolve
+        activeControllerRef.current = apiChatStream({
           question: q,
           thread_id: currentThread || '',
           onToken: (_, full) => {
@@ -170,7 +247,8 @@ export default function MultiTurnPanel() {
             })
           },
           onDone: (tid) => {
-            if (tid) { currentThread = tid; setThreadId(tid) }
+            pendingResolveRef.current = null
+            if (tid) { currentThread = tid; threadRef.current = tid; setThreadId(tid) }
             updateTimeline(t => {
               const c = [...t]
               c[c.length-1] = { ...c[c.length-1], streaming:false, ms:Date.now()-t0 }
@@ -179,6 +257,7 @@ export default function MultiTurnPanel() {
             resolve()
           },
           onError: (err) => {
+            pendingResolveRef.current = null
             updateTimeline(t => {
               const c = [...t]
               c[c.length-1] = { type:'err', label:`第 ${i+1} 轮 · 错误`, content:err, streaming:false, ms:Date.now()-t0 }
@@ -189,14 +268,30 @@ export default function MultiTurnPanel() {
           },
         })
       })
+      activeControllerRef.current = null
+
+      // 这一轮流式过程中被暂停（已 abort）：撤回这一轮未完成的用户消息 + AI 占位气泡，
+      // 记住从这一轮重新开始，之前跑完的轮次原样保留
+      if (pauseRequestedRef.current) {
+        updateTimeline(t => t.slice(0, -2))
+        resumeIndexRef.current = i
+        setPaused(true)
+        setRunning(false)
+        return
+      }
 
       if (!allOk) break
     }
 
+    // 正常跑完（或因错误中止），清空"待恢复位置"——下次点击就是全新运行
+    resumeIndexRef.current = 0
+    setPaused(false)
     await saveTimeline()  // 循环结束后保存，此时 ref 已有完整数据
 
     setRunning(false)
   }
+
+  const editingLocked = running || paused
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -204,13 +299,26 @@ export default function MultiTurnPanel() {
       {/* Controls */}
       <div style={styles.controls}>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-          <button onClick={run} disabled={running || !turns.some(t=>t.trim())} style={styles.runBtn}>
-            <Play size={13}/> {running ? '运行中…' : '开始多轮'}
-          </button>
+          {paused ? (
+            <button onClick={()=>run(true)} disabled={running} style={styles.runBtn}>
+              <Play size={13}/> 继续（从第 {resumeIndexRef.current+1} 轮）
+            </button>
+          ) : (
+            <button onClick={()=>run(false)} disabled={running || !turns.some(t=>t.trim())} style={styles.runBtn}>
+              <Play size={13}/> {running ? '运行中…' : '开始多轮'}
+            </button>
+          )}
+
+          {running && (
+            <button onClick={requestPause} style={styles.pauseBtn}>
+              <Pause size={13}/> 暂停
+            </button>
+          )}
+
           <button onClick={reset} disabled={running} style={styles.ghostBtn}>
             <RotateCcw size={13}/> 重置
           </button>
-          <button onClick={loadExample} disabled={running} style={styles.ghostBtn}>
+          <button onClick={loadExample} disabled={editingLocked} style={styles.ghostBtn}>
             载入示例
           </button>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -223,6 +331,11 @@ export default function MultiTurnPanel() {
               Thread: <code style={{ fontFamily:'var(--mono)' }}>{threadId}</code>
             </div>
           )}
+          {paused && (
+            <div style={styles.pausedBadge}>
+              ⏸ 已暂停 · 将从第 {resumeIndexRef.current+1} 轮继续
+            </div>
+          )}
         </div>
       </div>
 
@@ -231,7 +344,7 @@ export default function MultiTurnPanel() {
         <div style={styles.turnList}>
           <div style={styles.turnListHeader}>
             <span style={styles.label}>对话轮次</span>
-            <button onClick={addTurn} style={styles.addBtn}><Plus size={12}/></button>
+            <button onClick={addTurn} disabled={editingLocked} style={styles.addBtn}><Plus size={12}/></button>
           </div>
           <div style={{ flex:1, overflowY:'auto', padding:'10px 14px', display:'flex', flexDirection:'column', gap:8 }}>
             {turns.map((t, i) => (
@@ -243,10 +356,10 @@ export default function MultiTurnPanel() {
                   onChange={e=>setTurn(i, e.target.value)}
                   placeholder={`第 ${i+1} 轮消息…`}
                   rows={2}
-                  disabled={running}
+                  disabled={editingLocked}
                   style={styles.turnInput}
                 />
-                <button onClick={()=>delTurn(i)} disabled={running} style={styles.delBtn}>
+                <button onClick={()=>delTurn(i)} disabled={editingLocked} style={styles.delBtn}>
                   <Trash2 size={11}/>
                 </button>
               </div>
@@ -254,7 +367,7 @@ export default function MultiTurnPanel() {
           </div>
           {/* Fixed "add turn" button — outside the scroll area so it's never hidden */}
           <div style={{ padding:'8px 14px', borderTop:'1px solid var(--border)', flexShrink:0 }}>
-            <button onClick={addTurn} disabled={running} style={styles.addTurnBtn}>
+            <button onClick={addTurn} disabled={editingLocked} style={styles.addTurnBtn}>
               <Plus size={12}/> 添加轮次
             </button>
           </div>
@@ -290,6 +403,13 @@ const styles = {
     color:'#fff', cursor:'pointer', fontFamily:'var(--sans)', fontSize:13, fontWeight:500,
     transition:'all .15s',
   },
+  pauseBtn: {
+    display:'flex', alignItems:'center', gap:6, padding:'7px 16px',
+    background:'rgba(245,158,11,.1)', border:'1px solid rgba(245,158,11,.4)',
+    borderRadius:8, color:'#f59e0b', cursor:'pointer',
+    fontFamily:'var(--sans)', fontSize:13, fontWeight:500,
+    transition:'all .15s',
+  },
   ghostBtn: {
     display:'flex', alignItems:'center', gap:5, padding:'7px 12px',
     background:'var(--s2)', border:'1px solid var(--border)',
@@ -305,6 +425,11 @@ const styles = {
   threadBadge: {
     background:'rgba(91,156,246,.08)', border:'1px solid rgba(91,156,246,.2)',
     borderRadius:99, padding:'3px 12px', fontSize:11, color:'var(--accent)',
+  },
+  pausedBadge: {
+    background:'rgba(245,158,11,.1)', border:'1px solid rgba(245,158,11,.35)',
+    borderRadius:99, padding:'3px 12px', fontSize:11, color:'#f59e0b',
+    fontFamily:'var(--mono)',
   },
   turnList: {
     width:300, flexShrink:0, borderRight:'1px solid var(--border)',
