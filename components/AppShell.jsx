@@ -179,5 +179,5 @@ const styles = {
   panelHeader: { padding:'14px 24px', borderBottom:'1px solid var(--border)', flexShrink:0 },
   panelTitle: { fontFamily:'var(--mono)', fontSize:15, fontWeight:700, color:'var(--text)' },
   panelDesc: { fontSize:12, color:'var(--sub)', marginTop:2 },
-  panelBody: { flex:1, overflow:'hidden', display:'flex', flexDirection:'column' },
+  panelBody: { flex:1, overflowY:'auto', overflowX:'hidden', display:'flex', flexDirection:'column' },
 }
