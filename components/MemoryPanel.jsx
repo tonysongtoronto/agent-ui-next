@@ -7,12 +7,16 @@ import { apiListMemory, apiPutMemory, apiDeleteMemory,
          apiListLogs, apiAddLog, apiClearLogs } from '../lib/client.js'
 
 export default function MemoryPanel() {
-  const [items,   setItems]   = useState({})
+  // items = { system: {key:value}, user: {user_id: {key:value}} }
+  const [items,   setItems]   = useState({ system: {}, user: {} })
   const [loading, setLoading] = useState(false)
   const [newKey,  setNewKey]  = useState('')
   const [newVal,  setNewVal]  = useState('')
+  const [scope,   setScope]   = useState('system')     // 'system' | 'user'
+  const [scopeUid, setScopeUid] = useState('')          // scope==='user' 时必填
   const [saving,  setSaving]  = useState(false)
   const [log,     setLog]     = useState([])
+  const [expandedUsers, setExpandedUsers] = useState({}) // { user_id: bool }
 
 
   // 从 ui.db 读日志
@@ -46,7 +50,7 @@ export default function MemoryPanel() {
     setLoading(true)
     try {
       const res = await apiListMemory()
-      setItems(res.items || {})
+      setItems({ system: res.system || {}, user: res.user || {} })
     } catch (e) {
       addLog('err', `✗ 加载失败：${e.message}`)
     } finally { setLoading(false) }
@@ -59,10 +63,12 @@ export default function MemoryPanel() {
 
   const save = async () => {
     if (!newKey.trim() || !newVal.trim()) return
+    if (scope === 'user' && !scopeUid.trim()) return
     setSaving(true)
     try {
-      await apiPutMemory(newKey.trim(), newVal.trim())
-      addLog('ok', `✓ 已写入：${newKey} = ${newVal.slice(0,40)}`)
+      await apiPutMemory(newKey.trim(), newVal.trim(), scope, scope === 'user' ? scopeUid.trim() : null)
+      const scopeLabel = scope === 'user' ? `user/${scopeUid.trim()}` : 'system'
+      addLog('ok', `✓ 已写入 [${scopeLabel}]：${newKey} = ${newVal.slice(0,40)}`)
       setNewKey(''); setNewVal('')
       await load()
     } catch (e) {
@@ -70,15 +76,19 @@ export default function MemoryPanel() {
     } finally { setSaving(false) }
   }
 
-  const del = async (key) => {
+  // namespace: 'system' | 'user'；userId 仅 namespace==='user' 时需要
+  const del = async (key, namespace = 'system', userId = null) => {
     try {
-      await apiDeleteMemory(key)
-      addLog('ok', `✓ 已删除：${key}`)
+      await apiDeleteMemory(key, namespace, userId)
+      const scopeLabel = namespace === 'user' ? `user/${userId}` : 'system'
+      addLog('ok', `✓ 已删除 [${scopeLabel}]：${key}`)
       await load()
     } catch (e) {
       addLog('err', `✗ 删除失败：${e.message}`)
     }
   }
+
+  const toggleUser = (uid) => setExpandedUsers(s => ({ ...s, [uid]: !s[uid] }))
 
   // 清空日志：调 DELETE /api/ui/logs，再刷新 state
   const clearLogs = async () => {
@@ -90,7 +100,10 @@ export default function MemoryPanel() {
     }
   }
 
-  const count = Object.keys(items).length
+  const systemEntries = Object.entries(items.system || {})
+  const userGroups     = Object.entries(items.user || {}) // [ [user_id, {key:value}], ... ]
+  const userEntryCount = userGroups.reduce((sum, [, kv]) => sum + Object.keys(kv).length, 0)
+  const count = systemEntries.length + userEntryCount
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:18 }} className="fade-up">
@@ -132,6 +145,20 @@ export default function MemoryPanel() {
         <div style={styles.cardTitle}>写入新记忆</div>
         <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:12 }}>
           <div style={{ display:'flex', gap:8 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:4, flex:'0 0 140px' }}>
+              <span style={styles.label}>范围</span>
+              <select value={scope} onChange={e=>setScope(e.target.value)} style={styles.input}>
+                <option value="system">system（全局共享）</option>
+                <option value="user">user（按用户共享）</option>
+              </select>
+            </div>
+            {scope === 'user' && (
+              <div style={{ display:'flex', flexDirection:'column', gap:4, flex:'0 0 180px' }}>
+                <span style={styles.label}>User ID</span>
+                <input value={scopeUid} onChange={e=>setScopeUid(e.target.value)}
+                  placeholder="所属用户 ID" style={styles.input}/>
+              </div>
+            )}
             <div style={{ display:'flex', flexDirection:'column', gap:4, flex:'0 0 200px' }}>
               <span style={styles.label}>Key</span>
               <input value={newKey} onChange={e=>setNewKey(e.target.value)}
@@ -144,23 +171,25 @@ export default function MemoryPanel() {
                 onKeyDown={e=>e.key==='Enter'&&save()}/>
             </div>
           </div>
-          <button onClick={save} disabled={saving||!newKey.trim()||!newVal.trim()} style={styles.saveBtn}>
+          <button onClick={save}
+            disabled={saving||!newKey.trim()||!newVal.trim()||(scope==='user'&&!scopeUid.trim())}
+            style={styles.saveBtn}>
             {saving ? <span style={styles.spinner}/> : <Plus size={14}/>}
             写入记忆
           </button>
         </div>
       </div>
 
-      {/* Memory list - 限制最大高度并引入自定义滚动条 */}
+      {/* System 命名空间 - 限制最大高度并引入自定义滚动条 */}
       <div style={styles.card}>
-        <div style={styles.cardTitle}>当前全局记忆 · system 命名空间</div>
-        {count === 0
+        <div style={styles.cardTitle}>当前全局记忆 · SYSTEM 命名空间</div>
+        {systemEntries.length === 0
           ? <div style={{ marginTop:14, color:'var(--sub)', fontSize:13, fontFamily:'var(--mono)' }}>
               暂无记忆
             </div>
           : (
             <div className="custom-scrollbar" style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8, maxHeight: 240, overflowY: 'auto', paddingRight: 6 }}>
-              {Object.entries(items).map(([k, v]) => {
+              {systemEntries.map(([k, v]) => {
                 const display = typeof v === 'object' ? (v.value ?? JSON.stringify(v)) : v
                 return (
                   <div key={k} style={styles.memRow} className="fade-in">
@@ -168,9 +197,56 @@ export default function MemoryPanel() {
                       <div style={styles.memKey}>{k}</div>
                       <div style={styles.memVal}>{String(display)}</div>
                     </div>
-                    <button onClick={()=>del(k)} style={styles.delBtn} title="删除">
+                    <button onClick={()=>del(k, 'system')} style={styles.delBtn} title="删除">
                       <Trash2 size={13}/>
                     </button>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        }
+      </div>
+
+      {/* User 命名空间 - 按 user_id 分组折叠显示 */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>当前全局记忆 · USER 命名空间</div>
+        {userGroups.length === 0
+          ? <div style={{ marginTop:14, color:'var(--sub)', fontSize:13, fontFamily:'var(--mono)' }}>
+              暂无记忆
+            </div>
+          : (
+            <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8 }}>
+              {userGroups.map(([uid, kv]) => {
+                const entries = Object.entries(kv)
+                const isOpen  = !!expandedUsers[uid]
+                return (
+                  <div key={uid} style={styles.userGroup} className="fade-in">
+                    <button onClick={()=>toggleUser(uid)} style={styles.userGroupHeader}>
+                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ fontSize:11, color:'var(--sub)' }}>{isOpen ? '▾' : '▸'}</span>
+                        <span style={{ fontFamily:'var(--mono)', fontSize:12.5, fontWeight:600, color:'var(--accent)' }}>{uid}</span>
+                      </span>
+                      <span style={{ fontSize:11, color:'var(--sub)', fontFamily:'var(--mono)' }}>{entries.length} 条</span>
+                    </button>
+                    {isOpen && (
+                      <div className="custom-scrollbar" style={{ marginTop:8, display:'flex', flexDirection:'column', gap:8, maxHeight: 240, overflowY: 'auto', paddingRight: 6 }}>
+                        {entries.map(([k, v]) => {
+                          const display = typeof v === 'object' ? (v.value ?? JSON.stringify(v)) : v
+                          return (
+                            <div key={k} style={styles.memRow} className="fade-in">
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <div style={styles.memKey}>{k}</div>
+                                <div style={styles.memVal}>{String(display)}</div>
+                              </div>
+                              <button onClick={()=>del(k, 'user', uid)} style={styles.delBtn} title="删除">
+                                <Trash2 size={13}/>
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -248,6 +324,15 @@ const styles = {
     color:'var(--accent)', marginBottom:3,
   },
   memVal: { fontSize:13, color:'var(--text)', lineHeight:1.5, wordBreak:'break-all' },
+  userGroup: {
+    background:'var(--s2)', border:'1px solid var(--border)',
+    borderRadius:8, padding:10,
+  },
+  userGroupHeader: {
+    display:'flex', alignItems:'center', justifyContent:'space-between',
+    width:'100%', background:'none', border:'none', cursor:'pointer',
+    padding:0, color:'inherit',
+  },
   delBtn: {
     padding:6, background:'none', border:'none',
     color:'var(--sub)', cursor:'pointer', display:'flex',
