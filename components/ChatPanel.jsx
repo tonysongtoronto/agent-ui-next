@@ -4,14 +4,45 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { marked } from 'marked'
-import { Send, StopCircle, Plus, Trash2 } from 'lucide-react'
+import { Send, StopCircle, Plus, Trash2, ClipboardCheck } from 'lucide-react'
 import { apiChatStream, apiChat } from '../lib/client.js'
+import { setCurrentThread, navigateTo } from '../lib/shared.js'
 
 marked.setOptions({ breaks: true, gfm: true })
 
-function MsgBubble({ role, content, ms }) {
+function MsgBubble({ role, content, ms, gateCount, onGoReview }) {
   const isUser = role === 'user'
   const isErr  = role === 'error'
+  const isInterrupted = role === 'interrupted'
+
+  if (isInterrupted) {
+    return (
+      <div className="fade-up" style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+        <div style={{
+          width:28, height:28, borderRadius:7, display:'flex', alignItems:'center',
+          justifyContent:'center', fontSize:11, fontWeight:700, flexShrink:0, fontFamily:'var(--mono)',
+          background:'#3a2d10', border:'1px solid #6a5220', color:'var(--warn)',
+        }}>!</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{
+            padding:'10px 14px', borderRadius:9, fontSize:13.5, lineHeight:1.75,
+            background:'rgba(251,191,36,.08)', border:'1px solid rgba(251,191,36,.3)', color:'var(--text)',
+            display:'flex', flexDirection:'column', gap:8,
+          }}>
+            <span>{content}</span>
+            <button onClick={onGoReview} style={{
+              alignSelf:'flex-start', display:'flex', alignItems:'center', gap:6,
+              padding:'6px 12px', background:'var(--warn)', border:'none', borderRadius:7,
+              color:'#1a1206', fontSize:12, fontWeight:700, fontFamily:'var(--sans)', cursor:'pointer',
+            }}>
+              <ClipboardCheck size={13}/> 前往人工审核（{gateCount} 项）
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fade-up" style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
       <div style={{
@@ -62,8 +93,11 @@ export default function ChatPanel() {
   }, [messages])
 
   const newSession = () => {
-    setThreadId(`user_${Math.random().toString(36).slice(2,10)}`)
+    const tid = `user_${Math.random().toString(36).slice(2,10)}`
+    setThreadId(tid)
     setMessages([])
+    // ★ HITL 改动：同步到共享存储，「人工审核」面板挂载时能自动带入这个会话
+    setCurrentThread({ userId: 'default', threadId: tid })
   }
 
   const clearChat = () => setMessages([])
@@ -76,6 +110,7 @@ export default function ChatPanel() {
 
     const tid = threadId || `user_${Math.random().toString(36).slice(2,10)}`
     if (!threadId) setThreadId(tid)
+    setCurrentThread({ userId: 'default', threadId: tid })
 
     setMessages(m => [...m, { role:'user', content:q }])
     const t0 = Date.now()
@@ -94,7 +129,7 @@ export default function ChatPanel() {
           })
         },
         onDone: (resolvedTid) => {
-          if (resolvedTid) setThreadId(resolvedTid)
+          if (resolvedTid) { setThreadId(resolvedTid); setCurrentThread({ threadId: resolvedTid }) }
           setMessages(m => {
             const copy = [...m]
             copy[copy.length-1] = { ...copy[copy.length-1], ms: Date.now()-t0 }
@@ -110,18 +145,59 @@ export default function ChatPanel() {
           })
           setStreaming(false)
         },
+        // ★ HITL 改动：本轮请求被 human_review_gate 的 interrupt() 冻结了，
+        //   不是正常回答完成。把占位的空 AI 气泡换成一条特殊的"中断提示"气泡，
+        //   而不是留一个永远转圈/空白的气泡在那里。
+        onInterrupted: (payload) => {
+          const gateItems = payload.pending_gate_items || []
+          setMessages(m => {
+            const copy = [...m]
+            copy[copy.length-1] = {
+              role: 'interrupted',
+              content: `本次请求中有 ${gateItems.length} 个任务需要人工确认后才能继续（自动重试已耗尽，或涉及高风险操作）。`,
+              gateCount: gateItems.length,
+            }
+            return copy
+          })
+          setStreaming(false)
+        },
+        // ★ HITL 改动：上一轮还冻结在人工审核上，这一轮请求被后端 409 拒绝
+        onRejected: (payload) => {
+          setMessages(m => {
+            const copy = [...m]
+            copy[copy.length-1] = {
+              role: 'interrupted',
+              content: payload.message || '当前会话存在未处理完的人工审核事项，请先处理完再发新消息。',
+              gateCount: (payload.pending_gate_items || []).length,
+            }
+            return copy
+          })
+          setStreaming(false)
+        },
       })
     } else {
       setStreaming(true)
       setMessages(m => [...m, { role:'ai', content:'', ms:null }])
       apiChat(q, tid)
         .then(res => {
-          if (res.thread_id) setThreadId(res.thread_id)
-          setMessages(m => {
-            const copy = [...m]
-            copy[copy.length-1] = { role:'ai', content:res.answer, ms:Date.now()-t0 }
-            return copy
-          })
+          if (res.thread_id) { setThreadId(res.thread_id); setCurrentThread({ threadId: res.thread_id }) }
+          if (res.interrupted) {
+            setMessages(m => {
+              const copy = [...m]
+              copy[copy.length-1] = {
+                role: 'interrupted',
+                content: `本次请求中有 ${res.gateItems.length} 个任务需要人工确认后才能继续（自动重试已耗尽，或涉及高风险操作）。`,
+                gateCount: res.gateItems.length,
+              }
+              return copy
+            })
+          } else {
+            setMessages(m => {
+              const copy = [...m]
+              copy[copy.length-1] = { role:'ai', content:res.answer, ms:Date.now()-t0 }
+              return copy
+            })
+          }
         })
         .catch(err => {
           setMessages(m => {
@@ -175,7 +251,8 @@ export default function ChatPanel() {
           </div>
         )}
         {messages.map((m, i) => (
-          <MsgBubble key={i} role={m.role} content={m.content} ms={m.ms} />
+          <MsgBubble key={i} role={m.role} content={m.content} ms={m.ms}
+            gateCount={m.gateCount} onGoReview={() => navigateTo('review')} />
         ))}
         <div ref={bottomRef} />
       </div>

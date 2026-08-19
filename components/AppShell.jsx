@@ -2,11 +2,13 @@
 // components/AppShell.jsx  ——  第四阶段更新
 // 新增：TracePanel（LangSmith）、PromptPanel（收藏夹）
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Activity, MessageSquare, Layers, GitBranch, Database,
-         Settings, Zap, GitCommit, BookMarked, Wrench } from 'lucide-react'
+         Settings, Zap, GitCommit, BookMarked, Wrench, ClipboardCheck } from 'lucide-react'
 import { useHealth } from '../hooks/useHealth.js'
+import { useAwaitingHuman } from '../hooks/useAwaitingHuman.js'
 import { getBaseUrl, setBaseUrl } from '../lib/client.js'
+import { onNavigate } from '../lib/shared.js'
 
 import HealthPanel     from './HealthPanel.jsx'
 import AgentToolsPanel from './AgentToolsPanel.jsx'
@@ -17,6 +19,7 @@ import SessionPanel    from './SessionPanel.jsx'
 import MemoryPanel     from './MemoryPanel.jsx'
 import TracePanel      from './TracePanel.jsx'
 import PromptPanel     from './PromptPanel.jsx'
+import TaskReviewPanel from './TaskReviewPanel.jsx'
 
 const NAV = [
   { id:'health',    label:'Health',      icon: Activity,     section:'监控' },
@@ -26,6 +29,7 @@ const NAV = [
   { id:'batch',     label:'Batch Test',  icon: Layers,       section:'对话' },
   { id:'multiturn', label:'Multi-Turn',  icon: GitBranch,    section:'对话' },
   { id:'prompts',   label:'Prompts',     icon: BookMarked,   section:'对话' },
+  { id:'review',    label:'人工审核',     icon: ClipboardCheck, section:'对话' },
   { id:'session',   label:'Sessions',    icon: Settings,     section:'管理' },
   { id:'memory',    label:'Memory',      icon: Database,     section:'管理' },
 ]
@@ -42,6 +46,12 @@ export default function AppShell() {
   const [active,  setActive]  = useState('health')
   const [baseUrl, setBase]    = useState(getBaseUrl)
   const { status, data }      = useHealth(15000)
+  // ★ HITL 改动：轮询当前共享会话是否冻结在人工审核，侧边栏显示红点提醒
+  const { isAwaiting, gateCount } = useAwaitingHuman(8000)
+
+  // ★ HITL 改动：监听其他面板（比如 ChatPanel 检测到 interrupt）发出的
+  //   "请切换到某个面板" 意图，见 lib/shared.js 的说明。
+  useEffect(() => onNavigate((tabId) => setActive(tabId)), [])
 
   const handleBaseUrl = (e) => {
     if (e.key === 'Enter' || e.type === 'blur') setBaseUrl(baseUrl)
@@ -58,6 +68,7 @@ export default function AppShell() {
     batch:     <BatchPanel />,
     multiturn: <MultiTurnPanel />,
     prompts:   <PromptPanel />,
+    review:    <TaskReviewPanel />,
     session:   <SessionPanel />,
     memory:    <MemoryPanel />,
   }
@@ -70,6 +81,7 @@ export default function AppShell() {
     batch:     { title:'Batch Test',      desc:'批量测试 · 顺序 / 并行执行' },
     multiturn: { title:'Multi-Turn',      desc:'多轮对话时间线 · 跨轮记忆验证' },
     prompts:   { title:'Prompt Library',  desc:'常用 Prompt 收藏夹 · 持久化 · 一键复制' },
+    review:    { title:'人工审核',         desc:'任务计划状态 · 失败重试 / 高风险审批 · 断点恢复' },
     session:   { title:'Sessions',        desc:'会话管理 · 别名 / Pin · 持久化元数据' },
     memory:    { title:'Memory Store',    desc:'全局记忆 · AsyncSqliteStore · system 命名空间' },
   }
@@ -137,6 +149,9 @@ export default function AppShell() {
                   {item.label}
                   {item.id === 'health' && status === 'error' && (
                     <span style={styles.errDot}/>
+                  )}
+                  {item.id === 'review' && isAwaiting && (
+                    <span style={styles.errDot} title={`${gateCount} 项待处理`}/>
                   )}
                 </button>
               )
