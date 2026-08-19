@@ -138,6 +138,7 @@ export default function AppShell() {
                 <button
                   key={item.id}
                   onClick={() => setActive(item.id)}
+                  title={item.id === 'review' && isAwaiting ? `${gateCount} 项待处理` : undefined}
                   style={{
                     ...styles.navItem,
                     color:           isActive ? 'var(--accent)'         : 'var(--sub)',
@@ -151,7 +152,7 @@ export default function AppShell() {
                     <span style={styles.errDot}/>
                   )}
                   {item.id === 'review' && isAwaiting && (
-                    <span style={styles.errDot} title={`${gateCount} 项待处理`}/>
+                    <span style={styles.errDot} />
                   )}
                 </button>
               )

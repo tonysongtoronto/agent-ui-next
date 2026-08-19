@@ -181,7 +181,21 @@ export default function ChatPanel() {
       apiChat(q, tid)
         .then(res => {
           if (res.thread_id) { setThreadId(res.thread_id); setCurrentThread({ threadId: res.thread_id }) }
-          if (res.interrupted) {
+
+          // ★ 改动：rejected（上一轮还冻结在人工审核，本轮请求被后端 409 拒绝）
+          //   跟 interrupted 分开判断，走同一套「中断提示」气泡，
+          //   文案直接用后端/client.js 给的 res.message。
+          if (res.rejected) {
+            setMessages(m => {
+              const copy = [...m]
+              copy[copy.length-1] = {
+                role: 'interrupted',
+                content: res.message || '当前会话存在未处理完的人工审核事项，请先处理完再发新消息。',
+                gateCount: (res.gateItems || []).length,
+              }
+              return copy
+            })
+          } else if (res.interrupted) {
             setMessages(m => {
               const copy = [...m]
               copy[copy.length-1] = {

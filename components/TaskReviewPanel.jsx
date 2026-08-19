@@ -181,6 +181,7 @@ export default function TaskReviewPanel() {
   useEffect(() => {
     const t = getCurrentThread()
     if (t.threadId) { setUserId(t.userId); setThreadId(t.threadId) }
+    
   }, [])
 
   // ★ 改动：新增 preserveBanner 参数（默认 false，跟原行为一致）。
