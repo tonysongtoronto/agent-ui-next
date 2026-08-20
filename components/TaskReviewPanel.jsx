@@ -20,7 +20,7 @@ import {
   Clock, Ban, PlayCircle, SkipForward, Edit3, Send, OctagonX,
 } from 'lucide-react'
 import { apiGetTaskPlanState, apiResumeTaskPlan, apiResumeTaskPlanStream, apiAbortTaskPlanStream } from '../lib/client.js'
-import { getCurrentThread, setCurrentThread } from '../lib/shared.js'
+import { getCurrentThread, setCurrentThread, onCurrentThreadChange } from '../lib/shared.js'
 
 // ── 状态 → 展示样式映射（跟 langgraph_parallel_agent.py 的 _STATUS_LABELS 对应）──
 const STATUS_META = {
@@ -209,6 +209,26 @@ export default function TaskReviewPanel() {
       setLoading(false)
     }
   }, [threadId, userId])
+
+  // ★ Bugfix：AppShell 现在把访问过的面板保持挂载（切走只隐藏，不卸载，
+  //   见 AppShell.jsx 的改动），本面板不再是每次切进来都重新 mount 一遍
+  //   ——上面那个只在"挂载时"读一次 getCurrentThread() 的 effect 因此只会
+  //   在用户第一次点进「人工审核」时生效一次。如果用户是从 Batch Test /
+  //   Chat 的「前往人工审核」按钮跳转过来（针对某一条具体用例设置了新的
+  //   thread_id），且本面板之前已经被访问过、还挂载在后台，就不会再收到
+  //   这个新的 thread_id，导致停留在上一次查看的会话上，审核了错误/过期
+  //   的那一条。这里改成订阅 lib/shared.js 的跨面板变更事件：只要别的面板
+  //   调用 setCurrentThread（不管本面板当前是显示还是隐藏），都同步更新
+  //   thread_id/user_id，并直接拉一次最新状态，省得用户还要手动点刷新。
+  useEffect(() => {
+    return onCurrentThreadChange(({ userId: uid, threadId: tid }) => {
+      if (!tid) return
+      const nextUid = uid || 'default'
+      setUserId(nextUid)
+      setThreadId(tid)
+      refresh(tid, nextUid)
+    })
+  }, [refresh])
 
   const handleThreadBlur = () => {
     if (threadId.trim()) setCurrentThread({ userId: userId.trim() || 'default', threadId: threadId.trim() })

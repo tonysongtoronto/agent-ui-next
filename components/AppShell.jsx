@@ -49,9 +49,27 @@ export default function AppShell() {
   // ★ HITL 改动：轮询当前共享会话是否冻结在人工审核，侧边栏显示红点提醒
   const { isAwaiting, gateCount } = useAwaitingHuman(8000)
 
+  // ★ Bugfix：之前 `{panels[active]}` 只渲染当前激活的那一个面板，切走
+  //   的瞬间旧面板就被 React 整个卸载——所有内部 useState（Batch Test 的
+  //   运行结果、暂停状态、Chat 的消息列表等）全部清空。比如在 Batch Test
+  //   点「前往人工审核」跳到 review 面板处理完，再切回来 Batch Test 已经
+  //   变回了空白的初始录入界面，之前跑完的/暂停的结果全丢了。
+  //   这里改成"访问过的面板保持挂载，只是用 CSS display 切换显隐"（懒挂载
+  //   + keep-alive）：一个面板只有第一次被访问时才会创建/挂载，此后无论
+  //   切到别的标签页多少次，它的组件实例、内部 state、正在进行的请求/
+  //   流式连接都不会被销毁，只是隐藏起来；切回来的时候是原样恢复，不是
+  //   重新加载。
+  const [visited, setVisited] = useState(() => new Set(['health']))
+
   // ★ HITL 改动：监听其他面板（比如 ChatPanel 检测到 interrupt）发出的
   //   "请切换到某个面板" 意图，见 lib/shared.js 的说明。
   useEffect(() => onNavigate((tabId) => setActive(tabId)), [])
+
+  // 每次激活的标签页变化时，把它记入"访问过"的集合（已经在集合里则不产生
+  // 新的 Set，避免无意义的重渲染）。
+  useEffect(() => {
+    setVisited(prev => (prev.has(active) ? prev : new Set(prev).add(active)))
+  }, [active])
 
   const handleBaseUrl = (e) => {
     if (e.key === 'Enter' || e.type === 'blur') setBaseUrl(baseUrl)
@@ -170,7 +188,20 @@ export default function AppShell() {
           </div>
         </div>
         <div style={styles.panelBody}>
-          {panels[active]}
+          {/* 只渲染"访问过"的面板（懒挂载），已挂载的面板切走时不卸载，
+              而是用 display:none 隐藏，保持组件实例和内部 state 存活。
+              key 用面板 id，保证 React 复用同一个组件实例而不是重新创建。 */}
+          {[...visited].map(id => (
+            <div
+              key={id}
+              style={{
+                ...styles.panelSlot,
+                display: active === id ? 'flex' : 'none',
+              }}
+            >
+              {panels[id]}
+            </div>
+          ))}
         </div>
       </main>
     </div>
@@ -195,5 +226,18 @@ const styles = {
   panelHeader: { padding:'14px 24px', borderBottom:'1px solid var(--border)', flexShrink:0 },
   panelTitle: { fontFamily:'var(--mono)', fontSize:15, fontWeight:700, color:'var(--text)' },
   panelDesc: { fontSize:12, color:'var(--sub)', marginTop:2 },
-  panelBody: { flex:1, minHeight:0, overflowY:'auto', overflowX:'hidden', display:'flex', flexDirection:'column' },
+  // ★ Bugfix：这里之前自己也开了 overflowY:'auto'，跟每个面板内部自己的
+  //   滚动区域（比如 BatchPanel 结果列表那个 overflowY:'scroll' 的 div）
+  //   形成了两层嵌套的滚动容器。因为内层 flex 子元素几乎正好撑满这一层的
+  //   高度，外层这条 overflow:auto 基本没有真实溢出量，它的滚动条看起来
+  //   贴着窗口右边缘存在，但滑块拖不动内容；同时它还挡在真正需要滚动的
+  //   内层滚动条前面，干扰其鼠标/触摸事件——表现出来就是"右边这条滚动条
+  //   不工作"。panelBody 只负责占满可用空间，滚动完全交给各面板自己内部
+  //   的滚动区域（跟 ChatPanel/MultiTurnPanel/HealthPanel/SessionPanel 已经
+  //   在用的模式保持一致），所以这里改成 overflow:'hidden'，不再自己滚动。
+  panelBody: { flex:1, minHeight:0, overflow:'hidden', display:'flex', flexDirection:'column', position:'relative' },
+  // 每个面板的容器：占满 panelBody 的空间。非激活时 display:none（在上面
+  // 内联样式里覆盖），激活时 flex 撑满，宽度用 100% 保证跟之前单面板渲染
+  // 时的布局完全一致。
+  panelSlot: { flex:1, minHeight:0, width:'100%', flexDirection:'column' },
 }

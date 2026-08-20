@@ -37,18 +37,19 @@ body {
 }
 
 /* ── Scrollbar ─────────────────────────────────────────── */
-/* 之前是 5px 宽 + var(--border2) 深灰蓝(#28334e)，在 var(--s1) 这种深色
-   背景(#0c0f18)上对比度太低，不 hover 的时候基本看不见。加宽加亮之后
-   在有的浏览器（比如 Edge 默认开启的 Fluent 悬浮式滚动条）下滑块本身
-   还是只在正在滚动/hover 时才短暂出现，截图这种"停下来的瞬间"拍到的
-   就是看不见的状态。所以这里不再只靠滑块本身：轨道(track)也给一个
-   常驻可见的浅色背景，形成一条固定的竖线，不依赖滑块是否正在渲染，
-   任何时候一眼就能看出"这里能滚"。 */
-* { scrollbar-width: thin; scrollbar-color: #4a5670 rgba(255,255,255,.05); }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: rgba(255,255,255,.05); }
-::-webkit-scrollbar-thumb { background: #5b6b8c; border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: #8b9bc0; background-clip: padding-box; }
+/* 之前轨道(track)背景是 rgba(255,255,255,.05) —— 5% 白色叠在
+   var(--s1)/var(--s2) 这种接近纯黑的背景上，肉眼（尤其是截图里）基本
+   等于看不见，滑块本身在"仅滚动时才显示悬浮滚动条"的浏览器/系统设置下
+   （比如 Chrome 新版 Fluent 悬浮滚动条、macOS "仅滚动时显示"）也只是
+   一闪而过。停下来的那一瞬间截图，看到的就是"什么都没有"，给人一种
+   "这里根本没有滚动条、内容多了也拉不动"的错觉。这里把轨道透明度和
+   滑块对比度都明显提高，做成一条常驻可见的浅色竖线（不依赖滑块是否
+   正在渲染），任何时候一眼就能看出"这里能滚、滚动条在这个位置"。 */
+* { scrollbar-width: thin; scrollbar-color: #64749a rgba(255,255,255,.16); }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,.16); border-radius: 99px; }
+::-webkit-scrollbar-thumb { background: #64749a; border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #93a3c8; background-clip: padding-box; }
 
 /* ── Markdown rendered content ─────────────────────────── */
 .md-body { font-size: 13.5px; line-height: 1.8; }

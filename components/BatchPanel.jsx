@@ -48,7 +48,7 @@ function ResultCard({ item, idx, onGoReview, onRecheck }) {
         <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)', minWidth:24 }}>
           #{String(idx+1).padStart(2,'0')}
         </span>
-        <span style={{ flex:1, fontSize:13, color:'var(--text)',
+        <span style={{ flex:1, minWidth:0, fontSize:13, color:'var(--text)',
           overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
           {item.question}
         </span>
@@ -69,13 +69,28 @@ function ResultCard({ item, idx, onGoReview, onRecheck }) {
       {open && isInterrupted && (
         <div style={styles.interruptedBox}>
           <span>{item.message}</span>
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
             <button onClick={(e) => { e.stopPropagation(); onGoReview(item) }} style={styles.reviewBtn}>
               <ClipboardCheck size={13}/> 前往人工审核（{item.gateCount} 项）
             </button>
-            <button onClick={(e) => { e.stopPropagation(); onRecheck(idx) }} style={styles.recheckBtn}>
-              <RefreshCw size={13} style={{ animation: item.checking ? 'spin 1s linear infinite' : 'none' }}/> 刷新状态
+            <button
+              onClick={(e) => { e.stopPropagation(); onRecheck(idx) }}
+              disabled={item.checking}
+              style={{ ...styles.recheckBtn, opacity: item.checking ? .65 : 1, cursor: item.checking ? 'default' : 'pointer' }}
+            >
+              <RefreshCw size={13} style={{ animation: item.checking ? 'spin .6s linear infinite' : 'none' }}/>
+              {item.checking ? '正在检查…' : '刷新状态'}
             </button>
+            {/* ★ Bugfix：不管检查结果有没有变化，都给一条明确、带时间戳的
+                反馈，让用户确认"刚才那次点击确实生效了"。 */}
+            {item.recheckNote && (
+              <span style={{
+                fontSize:11, fontFamily:'var(--mono)',
+                color: item.recheckNote.kind === 'error' ? 'var(--err)' : 'var(--sub)',
+              }}>
+                {item.recheckNote.kind === 'error' ? '✗ ' : '✓ '}{item.recheckNote.text}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -122,16 +137,29 @@ export default function BatchPanel() {
   //     - 还在 waiting_human：保持 interrupted，更新最新的待办事项数量
   //     - 不再等待人工处理：视为该用例已跑完，转成 done（没有单独的最终
   //       回答文本可用，就用任务计划状态拼一句摘要展示）
+  // ★ Bugfix：之前点「刷新状态」时，如果查询结果仍然是"还在等待人工审核"
+  //   （最常见的情况——用户还没在 Review 面板处理完），代码只是悄悄把
+  //   gateCount 更新一下（多数情况下数值根本没变），checking 状态又只在
+  //   请求这几百毫秒内为 true（转圈动画一晃就没了，几乎看不见），卡片
+  //   整体看起来跟点击前一模一样——用户完全感觉不到"我点了它，它有干活"，
+  //   即便请求确实发到了后端。这里补上明确的、有停留时间的反馈：
+  //     1. 正在检查时按钮禁用，避免连续点击并发出多个请求。
+  //     2. 无论查到的结果是什么，都记录一条 recheckNote（还在等待 / 已处理
+  //        完毕 / 查询失败），并附上时间戳；ResultCard 里常驻展示这条提示，
+  //        而不是只有状态真的变化时才有动静。
   const recheckItem = async (i) => {
     const item = results[i]
-    if (!item?.threadId) return
-    setResults(r => { const c=[...r]; c[i]={...c[i],checking:true}; return c })
+    if (!item?.threadId || item.checking) return
+    setResults(r => { const c=[...r]; c[i]={...c[i],checking:true,recheckNote:null}; return c })
     try {
       const state = await apiGetTaskPlanState(item.threadId, item.userId || 'default')
       setResults(r => {
         const c=[...r]
         if (state.is_awaiting_human) {
-          c[i] = { ...c[i], checking:false, gateCount:(state.pending_gate_items||[]).length }
+          c[i] = {
+            ...c[i], checking:false, gateCount:(state.pending_gate_items||[]).length,
+            recheckNote: { kind:'still-waiting', text:`仍在等待人工审核（${(state.pending_gate_items||[]).length} 项待处理） · ${new Date().toLocaleTimeString()}` },
+          }
         } else {
           const doneCount = (state.task_plan||[]).filter(t=>t.status==='done').length
           const total = (state.task_plan||[]).length
@@ -141,12 +169,17 @@ export default function BatchPanel() {
             answer: state.plan_status === 'aborted'
               ? '任务计划已在人工审核中被终止。'
               : `（人工审核已处理完毕，任务计划：${doneCount}/${total} 项完成）`,
+            recheckNote: null,
           }
         }
         return c
       })
     } catch (e) {
-      setResults(r => { const c=[...r]; c[i]={...c[i],checking:false}; return c })
+      setResults(r => {
+        const c=[...r]
+        c[i]={...c[i],checking:false,recheckNote:{ kind:'error', text:`刷新失败：${e.message || '请求出错'} · ${new Date().toLocaleTimeString()}` }}
+        return c
+      })
     }
   }
 
@@ -335,8 +368,8 @@ export default function BatchPanel() {
       </div>
 
       <div style={{
-        flex:1, minHeight:0, overflowY:'scroll', padding:'16px 20px',
-        display:'flex', flexDirection:'column', gap:10,
+        flex:1, minHeight:0, minWidth:0, overflowY:'scroll', overflowX:'hidden',
+        padding:'16px 20px', display:'flex', flexDirection:'column', gap:10,
       }}>
         {/* Case inputs (only shown when not running) */}
         {results.length === 0 && (
