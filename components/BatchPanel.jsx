@@ -163,12 +163,17 @@ export default function BatchPanel() {
         } else {
           const doneCount = (state.task_plan||[]).filter(t=>t.status==='done').length
           const total = (state.task_plan||[]).length
+          // ★ Bugfix：后端 /state 现在会带上真正的最终回答文本（state.answer），
+          //   优先用它；只有 answer 确实拿不到（比如老后端、或这一轮压根没
+          //   跑到 final_answer_node）时，才退回到原来"任务计划 N/M 项完成"
+          //   的占位摘要，不再无条件用占位文案盖掉真实回答。
+          const fallback = state.plan_status === 'aborted'
+            ? '任务计划已在人工审核中被终止。'
+            : `（人工审核已处理完毕，任务计划：${doneCount}/${total} 项完成）`
           c[i] = {
             ...c[i], checking:false,
             status: state.plan_status === 'aborted' ? 'error' : 'done',
-            answer: state.plan_status === 'aborted'
-              ? '任务计划已在人工审核中被终止。'
-              : `（人工审核已处理完毕，任务计划：${doneCount}/${total} 项完成）`,
+            answer: state.answer || fallback,
             recheckNote: null,
           }
         }
