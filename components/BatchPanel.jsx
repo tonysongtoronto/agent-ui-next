@@ -311,7 +311,7 @@ export default function BatchPanel() {
   const hasPaused = results.some(r => r.status === 'paused')
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
       {/* Config */}
       <div style={styles.config}>
@@ -367,9 +367,24 @@ export default function BatchPanel() {
         )}
       </div>
 
+      {/* ★ Bugfix：右边这条滚动条"看得见、拉不动"——根因不在 flex/overflow 布局
+          （那部分已经在前几轮修复过了），而是 app/globals.css 里全局写了
+          `* { scrollbar-width: thin; scrollbar-color: ... }`。现代 Chrome
+          （121+）只要检测到 scrollbar-width/scrollbar-color 被设成非 auto 的
+          值，就会整个忽略 ::-webkit-scrollbar-* 这套旧样式（这是 Chrome 官方
+          文档和 W3C CSSWG 都明确写过的行为）。也就是说 globals.css 里那段
+          "让滚动条常驻可见、12px 宽、好抓"的 ::-webkit-scrollbar 规则，在
+          真实 Chrome 里其实根本没生效——实际渲染的是原生的 scrollbar-width:
+          thin 瘦滚动条。而"瘦滚动条"在 Chrome/Firefox 里有个长期存在的已知
+          问题：可拖动的命中区域比视觉宽度窄得多，鼠标稍微偏一点就完全抓不住、
+          拖不动，跟这里的症状完全对得上。这里不改全局 CSS（不影响其它面板），
+          只在这一个滚动容器上把 scrollbarWidth/scrollbarColor 重置回 'auto'，
+          让浏览器对这个元素重新按初始值处理，从而放行 ::-webkit-scrollbar
+          那套更宽、真正可拖动的自定义样式生效。 */}
       <div style={{
         flex:1, minHeight:0, minWidth:0, overflowY:'scroll', overflowX:'hidden',
         padding:'16px 20px', display:'flex', flexDirection:'column', gap:10,
+        scrollbarWidth:'auto', scrollbarColor:'auto',
       }}>
         {/* Case inputs (only shown when not running) */}
         {results.length === 0 && (

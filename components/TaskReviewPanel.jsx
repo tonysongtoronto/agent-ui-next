@@ -354,7 +354,7 @@ export default function TaskReviewPanel() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* 顶部：会话选择 */}
       <div style={s.topBar}>
         <span style={s.topLabel}>User ID</span>

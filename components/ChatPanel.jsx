@@ -236,7 +236,7 @@ export default function ChatPanel() {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
       {/* Thread ID bar */}
       <div style={styles.threadBar}>
         <span style={styles.threadLabel}>Thread ID</span>

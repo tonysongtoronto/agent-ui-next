@@ -294,7 +294,7 @@ export default function MultiTurnPanel() {
   const editingLocked = running || paused
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
       {/* Controls */}
       <div style={styles.controls}>
