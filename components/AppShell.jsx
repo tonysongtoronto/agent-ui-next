@@ -44,7 +44,13 @@ const STATUS_DOT = {
 
 export default function AppShell() {
   const [active,  setActive]  = useState('health')
-  const [baseUrl, setBase]    = useState(getBaseUrl)
+  // ★ Hydration fix：不能在 useState 初始值里直接调用 getBaseUrl()——
+  //   服务端渲染时 getBaseUrl() 固定返回默认地址，但浏览器端会读
+  //   localStorage 里用户保存过的自定义地址，两次渲染结果不一致会
+  //   触发 hydration mismatch（表现为地址栏 input 的 value 不一致）。
+  //   所以首次渲染（服务端 + 客户端）都先用同一个默认值，等组件挂载
+  //   到浏览器之后，再用 useEffect 从 localStorage 读真实值同步进来。
+  const [baseUrl, setBase]    = useState('http://localhost:8000')
   const { status, data }      = useHealth(15000)
   // ★ HITL 改动：轮询当前共享会话是否冻结在人工审核，侧边栏显示红点提醒
   const { isAwaiting, gateCount } = useAwaitingHuman(8000)
@@ -61,15 +67,37 @@ export default function AppShell() {
   //   重新加载。
   const [visited, setVisited] = useState(() => new Set(['health']))
 
+  // ★ Refactor：之前这里分别用两个 effect 做两件事——
+  //   1) 监听 onNavigate 事件调用 setActive
+  //   2) 监听 active 变化再顺带更新 visited
+  //   但 visited 完全是从 active 派生出来的状态，不需要单独一个 effect
+  //   去"追着 active 的变化跑"（这也是新版 react-hooks/set-state-in-effect
+  //   规则真正想防的模式：本可以在触发变化的动作里直接算好，却绕道 effect
+  //   兜一圈）。这里改成统一的 goTo()，在真正触发切换的地方（导航栏点击 /
+  //   onNavigate 事件）一次性把 active 和 visited 都更新掉，effect 就可以
+  //   删掉了。
+  const goTo = (tabId) => {
+    setActive(tabId)
+    setVisited(prev => (prev.has(tabId) ? prev : new Set(prev).add(tabId)))
+  }
+
   // ★ HITL 改动：监听其他面板（比如 ChatPanel 检测到 interrupt）发出的
   //   "请切换到某个面板" 意图，见 lib/shared.js 的说明。
-  useEffect(() => onNavigate((tabId) => setActive(tabId)), [])
+  useEffect(() => onNavigate(goTo), [])
 
-  // 每次激活的标签页变化时，把它记入"访问过"的集合（已经在集合里则不产生
-  // 新的 Set，避免无意义的重渲染）。
+  // ★ Hydration fix：挂载后（此时一定在浏览器）再读一次 localStorage 里
+  //   真正保存过的地址，同步进 state。如果用户没改过，getBaseUrl() 本来
+  //   就会返回同一个默认值，这里等于什么都没变。
+  //   这里特意 disable react-hooks/set-state-in-effect：这不是"effect 里
+  //   无脑 setState 导致连锁重渲染"的滥用写法，而是只在挂载时跑一次
+  //   （依赖数组是空的 []）的"把浏览器专属数据同步进 React state"，是
+  //   React 官方推荐用来修复 SSR/CSR 不一致的标准手法。baseUrl 又是用户
+  //   可以手动编辑的受控 input，没法换成 useSyncExternalStore 之类的
+  //   只读 derived 值。
   useEffect(() => {
-    setVisited(prev => (prev.has(active) ? prev : new Set(prev).add(active)))
-  }, [active])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBase(getBaseUrl())
+  }, [])
 
   const handleBaseUrl = (e) => {
     if (e.key === 'Enter' || e.type === 'blur') setBaseUrl(baseUrl)
@@ -155,7 +183,7 @@ export default function AppShell() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActive(item.id)}
+                  onClick={() => goTo(item.id)}
                   title={item.id === 'review' && isAwaiting ? `${gateCount} 项待处理` : undefined}
                   style={{
                     ...styles.navItem,

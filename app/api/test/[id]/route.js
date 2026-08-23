@@ -1,6 +1,6 @@
 export async function DELETE(request, { params }) {
   try {
-    const { id } = params
+    const { id } = await params
 
     // ✅ 模拟删除，不用数据库
     if (!id) {
