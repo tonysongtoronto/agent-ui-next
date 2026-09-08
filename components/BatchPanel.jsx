@@ -18,9 +18,10 @@
 //   而不用离开 Batch Test 页面去 Chat 面板核对。
 import { useState, useRef } from 'react'
 import { marked } from 'marked'
-import { Plus, Play, Trash2, ChevronDown, ChevronUp, ClipboardCheck, RefreshCw } from 'lucide-react'
+import { Plus, Play, Trash2, ChevronDown, ChevronUp, ClipboardCheck, RefreshCw, ShieldQuestion } from 'lucide-react'
 import { apiChatStream, apiGetTaskPlanState } from '../lib/client.js'
 import { setCurrentThread, navigateTo } from '../lib/shared.js'
+import { classifyGateItems, summarizeGateItems } from '../lib/guardrail.js'
 
 const PRESETS = [
   '你好，我叫 Tony，今年 28 岁，住在多伦多',
@@ -32,8 +33,12 @@ const PRESETS = [
 function ResultCard({ item, idx, onGoReview, onRecheck }) {
   const [open, setOpen] = useState(true)
   const isInterrupted = item.status === 'interrupted'
-  const statusColor = { pending:'var(--sub)', running:'var(--warn)', done:'var(--ok)', error:'var(--err)', paused:'var(--sub)', interrupted:'var(--warn)' }
-  const statusLabel = { pending:'等待中', running:'运行中', done:'完成', error:'失败', paused:'已暂停', interrupted:'等待人工审核' }
+  // ★ Guardrail 改动：guardrail 触发的中断用红色调，普通执行失败需要人工
+  //   重试的维持原来的琥珀色调（gateKind 缺省按 'plain' 处理，兼容老数据/
+  //   还没跑过 recheck 的场景）。
+  const isGuardrail = isInterrupted && item.gateKind === 'guardrail'
+  const statusColor = { pending:'var(--sub)', running:'var(--warn)', done:'var(--ok)', error:'var(--err)', paused:'var(--sub)', interrupted: isGuardrail ? 'var(--err)' : 'var(--warn)' }
+  const statusLabel = { pending:'等待中', running:'运行中', done:'完成', error:'失败', paused:'已暂停', interrupted: isGuardrail ? '安全审核中' : '等待人工审核' }
 
   return (
     <div style={{
@@ -41,6 +46,7 @@ function ResultCard({ item, idx, onGoReview, onRecheck }) {
       borderColor: item.status === 'error' ? 'rgba(248,113,113,.3)'
                  : item.status === 'done'  ? 'rgba(52,211,153,.2)'
                  : item.status === 'paused' ? 'rgba(148,163,184,.3)'
+                 : isGuardrail ? 'rgba(248,113,113,.4)'
                  : isInterrupted ? 'rgba(251,191,36,.35)'
                  : 'var(--border)',
     }} className="fade-up">
@@ -50,14 +56,16 @@ function ResultCard({ item, idx, onGoReview, onRecheck }) {
         </span>
         <span style={{ flex:1, minWidth:0, fontSize:13, color:'var(--text)',
           overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-          {item.question}
+          {item.question} 
         </span>
         <span style={{ fontFamily:'var(--mono)', fontSize:11,
           color: statusColor[item.status], whiteSpace:'nowrap' }}>
           {item.status === 'running' && <span style={{ animation:'spin .6s linear infinite', display:'inline-block', marginRight:4 }}>◌</span>}
           {item.status === 'paused' && <span style={{ display:'inline-block', marginRight:4 }}>⏸</span>}
-          {isInterrupted && <span style={{ display:'inline-block', marginRight:4 }}>!</span>}
-          {statusLabel[item.status]}
+          {isInterrupted && (isGuardrail
+            ? <ShieldQuestion size={11} style={{ display:'inline-block', marginRight:4, verticalAlign:'-2px' }} />
+            : <span style={{ display:'inline-block', marginRight:4 }}>!</span>)}
+          {statusLabel[item.status]}  
         </span>
         {item.ms && <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--sub)', whiteSpace:'nowrap' }}>{item.ms}ms</span>}
         {open ? <ChevronUp size={13} color="var(--sub)"/> : <ChevronDown size={13} color="var(--sub)"/>}
@@ -65,12 +73,22 @@ function ResultCard({ item, idx, onGoReview, onRecheck }) {
 
       {/* ★ HITL 改动：命中 interrupt() 冻结 / 409 rejected 时，跟 ChatPanel 里
           的中断气泡展示同一段文案 + 同一个「前往人工审核」跳转，外加一个
-          「刷新状态」按钮，方便在 Review 面板处理完之后回来这里确认结果。 */}
+          「刷新状态」按钮，方便在 Review 面板处理完之后回来这里确认结果。
+          ★ Guardrail 改动：isGuardrail 时换成红色调 + 盾牌图标 + "安全策略
+          拦截"小标签，跟 ChatPanel/TaskReviewPanel 保持一致的视觉语言。 */}
       {open && isInterrupted && (
-        <div style={styles.interruptedBox}>
+        <div style={{
+          ...styles.interruptedBox,
+          ...(isGuardrail ? { borderTopColor: 'rgba(248,113,113,.3)', background: 'rgba(248,113,113,.08)' } : {}),
+        }}>
+          {isGuardrail && (
+            <span style={{ fontFamily:'var(--mono)', fontSize:11, fontWeight:700, color:'var(--err)',
+              textTransform:'uppercase', letterSpacing:'.04em' }}>安全策略拦截</span>
+          )}
           <span>{item.message}</span>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-            <button onClick={(e) => { e.stopPropagation(); onGoReview(item) }} style={styles.reviewBtn}>
+            <button onClick={(e) => { e.stopPropagation(); onGoReview(item) }}
+              style={isGuardrail ? { ...styles.reviewBtn, background:'var(--err)', color:'#1a0a0a' } : styles.reviewBtn}>
               <ClipboardCheck size={13}/> 前往人工审核（{item.gateCount} 项）
             </button>
             <button
@@ -153,12 +171,20 @@ export default function BatchPanel() {
     setResults(r => { const c=[...r]; c[i]={...c[i],checking:true,recheckNote:null}; return c })
     try {
       const state = await apiGetTaskPlanState(item.threadId, item.userId || 'default')
+      // console.debug('[BatchPanel] recheckItem state:', JSON.stringify(state, null, 2))
       setResults(r => {
         const c=[...r]
         if (state.is_awaiting_human) {
+          const gateItems = state.pending_gate_items || []
+          const { dominant, guardrailCount } = classifyGateItems(gateItems)
           c[i] = {
-            ...c[i], checking:false, gateCount:(state.pending_gate_items||[]).length,
-            recheckNote: { kind:'still-waiting', text:`仍在等待人工审核（${(state.pending_gate_items||[]).length} 项待处理） · ${new Date().toLocaleTimeString()}` },
+            ...c[i], checking:false, gateCount: gateItems.length, gateKind: dominant,
+            recheckNote: {
+              kind:'still-waiting',
+              text: dominant === 'guardrail'
+                ? `仍在等待安全审核（${guardrailCount} 项待处理） · ${new Date().toLocaleTimeString()}`
+                : `仍在等待人工审核（${gateItems.length} 项待处理） · ${new Date().toLocaleTimeString()}`,
+            },
           }
         } else {
           const doneCount = (state.task_plan||[]).filter(t=>t.status==='done').length
@@ -256,13 +282,14 @@ export default function BatchPanel() {
         //   并且必须 resolve()，让批量任务能继续往下跑。
         onInterrupted: (payload, tid) => {
           const gateItems = payload.pending_gate_items || []
+          const { dominant } = classifyGateItems(gateItems)
           setResults(r => {
             if (r[i].status === 'paused') return r // 已被暂停打断，不覆盖
             const c=[...r]
             c[i] = {
               ...c[i], status:'interrupted', ms:Date.now()-t0,
-              threadId: tid, userId: 'default', gateCount: gateItems.length,
-              message: `本次请求中有 ${gateItems.length} 个任务需要人工确认后才能继续（自动重试已耗尽，或涉及高风险操作）。`,
+              threadId: tid, userId: 'default', gateCount: gateItems.length, gateKind: dominant,
+              message: summarizeGateItems(gateItems),
             }
             return c
           })
@@ -274,13 +301,15 @@ export default function BatchPanel() {
         //   onInterrupted 一样的处理，避免万一（比如未来支持"续跑同一个
         //   thread_id"）出现同样的卡死问题。
         onRejected: (payload, tid) => {
+          const gateItems = payload.pending_gate_items || []
+          const { dominant } = classifyGateItems(gateItems)
           setResults(r => {
             if (r[i].status === 'paused') return r
             const c=[...r]
             c[i] = {
               ...c[i], status:'interrupted', ms:Date.now()-t0,
               threadId: tid || c[i].threadId, userId: 'default',
-              gateCount: (payload.pending_gate_items||[]).length,
+              gateCount: gateItems.length, gateKind: dominant,
               message: payload.message || '当前会话存在未处理完的人工审核事项，请先处理完再发新消息。',
             }
             return c

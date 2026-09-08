@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { Activity, MessageSquare, Layers, GitBranch, Database,
-         Settings, Zap, GitCommit, BookMarked, Wrench, ClipboardCheck } from 'lucide-react'
+         Settings, Zap, GitCommit, BookMarked, Wrench, ClipboardCheck, ShieldCheck } from 'lucide-react'
 import { useHealth } from '../hooks/useHealth.js'
 import { useAwaitingHuman } from '../hooks/useAwaitingHuman.js'
 import { getBaseUrl, setBaseUrl } from '../lib/client.js'
@@ -20,6 +20,7 @@ import MemoryPanel     from './MemoryPanel.jsx'
 import TracePanel      from './TracePanel.jsx'
 import PromptPanel     from './PromptPanel.jsx'
 import TaskReviewPanel from './TaskReviewPanel.jsx'
+import GuardrailAdminPanel from './GuardrailAdminPanel.jsx'
 
 const NAV = [
   { id:'health',    label:'Health',      icon: Activity,     section:'监控' },
@@ -32,6 +33,7 @@ const NAV = [
   { id:'review',    label:'人工审核',     icon: ClipboardCheck, section:'对话' },
   { id:'session',   label:'Sessions',    icon: Settings,     section:'管理' },
   { id:'memory',    label:'Memory',      icon: Database,     section:'管理' },
+  { id:'guardrail', label:'Guardrail',   icon: ShieldCheck,  section:'管理' },
 ]
 
 const STATUS_DOT = {
@@ -53,7 +55,9 @@ export default function AppShell() {
   const [baseUrl, setBase]    = useState('http://localhost:8000')
   const { status, data }      = useHealth(15000)
   // ★ HITL 改动：轮询当前共享会话是否冻结在人工审核，侧边栏显示红点提醒
-  const { isAwaiting, gateCount } = useAwaitingHuman(8000)
+  // ★ Guardrail 改动：额外拿到 hasGuardrail，用来决定红点/琥珀点、以及
+  //   tooltip 文案要不要提示"安全策略"
+  const { isAwaiting, gateCount, hasGuardrail } = useAwaitingHuman(8000)
 
   // ★ Bugfix：之前 `{panels[active]}` 只渲染当前激活的那一个面板，切走
   //   的瞬间旧面板就被 React 整个卸载——所有内部 useState（Batch Test 的
@@ -117,6 +121,7 @@ export default function AppShell() {
     review:    <TaskReviewPanel />,
     session:   <SessionPanel />,
     memory:    <MemoryPanel />,
+    guardrail: <GuardrailAdminPanel />,
   }
 
   const panelMeta = {
@@ -130,22 +135,31 @@ export default function AppShell() {
     review:    { title:'人工审核',         desc:'任务计划状态 · 失败重试 / 高风险审批 · 断点恢复' },
     session:   { title:'Sessions',        desc:'会话管理 · 别名 / Pin · 持久化元数据' },
     memory:    { title:'Memory Store',    desc:'全局记忆 · AsyncSqliteStore · system 命名空间' },
+    guardrail: { title:'Guardrail',       desc:'规则启用/禁用 · 输入/执行/输出侧判定与人工决策审计日志' },
   }
 
   const pt = panelMeta[active]
 
   return (
-    <div style={styles.root}>
+    <div style={styles.root} suppressHydrationWarning>
       {/* ── Top Bar ─────────────────────────── */}
-      <header style={styles.topbar}>
-        <div style={styles.logo}>
-          <Zap size={18} color="var(--accent)" strokeWidth={2.5}/>
-          <span style={styles.logoText}>
-            Agent<span style={{ color:'var(--sub)', fontWeight:400 }}>UI</span>
+      {/* ★ Hydration fix：这一整块内联样式很密，Darkreader 之类的浏览器
+          扩展会在 hydrate 之前抢先遍历并重写这些元素的内联样式（展开成
+          longhand + 塞入自己的 --darkreader-inline-* 变量和 data 属性），
+          导致 React 拿服务端 HTML 和客户端实际 DOM 一比对就报 hydration
+          mismatch。这不是应用代码的 bug，样式本身完全正确，所以给每个
+          带内联 style 的节点都加 suppressHydrationWarning——它只抑制"这
+          个节点自身"的属性/文本不匹配警告，不会往子元素传递，也不会掩盖
+          其他类型的真实渲染错误。 */}
+      <header style={styles.topbar} suppressHydrationWarning>
+        <div style={styles.logo} suppressHydrationWarning>
+          <Zap size={18} color="var(--accent)" strokeWidth={2.5} suppressHydrationWarning/>
+          <span style={styles.logoText} suppressHydrationWarning>
+            Agent<span style={{ color:'var(--sub)', fontWeight:400 }} suppressHydrationWarning>UI</span>
           </span>
-          <span style={styles.version}>v4.0-next</span>
+          <span style={styles.version} suppressHydrationWarning>v4.0-next</span>
         </div>
-        <div style={styles.sep}/>
+        <div style={styles.sep} suppressHydrationWarning/>
         <input
           value={baseUrl}
           onChange={e => setBase(e.target.value)}
@@ -154,15 +168,16 @@ export default function AppShell() {
           placeholder="http://localhost:8000"
           style={styles.urlInput}
           title="Python 后端地址（按 Enter 生效）"
+          suppressHydrationWarning
         />
-        <div style={styles.statusArea}>
+        <div style={styles.statusArea} suppressHydrationWarning>
           <div style={{
             ...styles.dot,
             background: dot.color,
             boxShadow: `0 0 8px ${dot.shadow}`,
             animation: dot.pulse ? 'pulse 1.2s ease infinite' : 'none',
-          }}/>
-          <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)' }}>
+          }} suppressHydrationWarning/>
+          <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--sub)' }} suppressHydrationWarning>
             {status==='ok'           && `正常 · ${data?.tool_count ?? 0} tools`}
             {status==='degraded'     && `降级 · ${data?.tool_count ?? 0} tools`}
             {status==='initializing' && '初始化中…'}
@@ -173,10 +188,10 @@ export default function AppShell() {
       </header>
 
       {/* ── Sidebar ─────────────────────────── */}
-      <nav style={styles.sidebar}>
+      <nav style={styles.sidebar} suppressHydrationWarning>
         {sections.map(sec => (
           <div key={sec}>
-            <div style={styles.navSection}>{sec}</div>
+            <div style={styles.navSection} suppressHydrationWarning>{sec}</div>
             {NAV.filter(n => n.section === sec).map(item => {
               const Icon = item.icon
               const isActive = active === item.id
@@ -184,21 +199,22 @@ export default function AppShell() {
                 <button
                   key={item.id}
                   onClick={() => goTo(item.id)}
-                  title={item.id === 'review' && isAwaiting ? `${gateCount} 项待处理` : undefined}
+                  title={item.id === 'review' && isAwaiting ? `${gateCount} 项待处理${hasGuardrail ? '（含安全策略拦截）' : ''}` : undefined}
                   style={{
                     ...styles.navItem,
                     color:           isActive ? 'var(--accent)'         : 'var(--sub)',
                     background:      isActive ? 'rgba(91,156,246,.08)'  : 'transparent',
                     borderLeftColor: isActive ? 'var(--accent)'         : 'transparent',
                   }}
+                  suppressHydrationWarning
                 >
-                  <Icon size={15} style={{ flexShrink:0 }}/>
+                  <Icon size={15} style={{ flexShrink:0 }} suppressHydrationWarning/>
                   {item.label}
                   {item.id === 'health' && status === 'error' && (
-                    <span style={styles.errDot}/>
+                    <span style={styles.errDot} suppressHydrationWarning/>
                   )}
                   {item.id === 'review' && isAwaiting && (
-                    <span style={styles.errDot} />
+                    <span style={hasGuardrail ? styles.errDot : styles.warnDot} suppressHydrationWarning/>
                   )}
                 </button>
               )
@@ -208,14 +224,14 @@ export default function AppShell() {
       </nav>
 
       {/* ── Main ────────────────────────────── */}
-      <main style={styles.main}>
-        <div style={styles.panelHeader}>
+      <main style={styles.main} suppressHydrationWarning>
+        <div style={styles.panelHeader} suppressHydrationWarning>
           <div>
-            <div style={styles.panelTitle}>{pt.title}</div>
-            <div style={styles.panelDesc}>{pt.desc}</div>
+            <div style={styles.panelTitle} suppressHydrationWarning>{pt.title}</div>
+            <div style={styles.panelDesc} suppressHydrationWarning>{pt.desc}</div>
           </div>
         </div>
-        <div style={styles.panelBody}>
+        <div style={styles.panelBody} suppressHydrationWarning>
           {/* 只渲染"访问过"的面板（懒挂载），已挂载的面板切走时不卸载，
               而是用 display:none 隐藏，保持组件实例和内部 state 存活。
               key 用面板 id，保证 React 复用同一个组件实例而不是重新创建。 */}
@@ -226,6 +242,7 @@ export default function AppShell() {
                 ...styles.panelSlot,
                 display: active === id ? 'flex' : 'none',
               }}
+              suppressHydrationWarning
             >
               {panels[id]}
             </div>
@@ -250,6 +267,9 @@ const styles = {
   navSection: { fontFamily:'var(--mono)', fontSize:10, fontWeight:600, color:'var(--sub)', letterSpacing:'.1em', textTransform:'uppercase', padding:'10px 18px 4px' },
   navItem: { display:'flex', alignItems:'center', gap:9, width:'100%', padding:'9px 18px', fontSize:13, fontWeight:500, border:'none', borderLeft:'3px solid transparent', cursor:'pointer', transition:'all .15s', textAlign:'left', fontFamily:'var(--sans)', background:'transparent', position:'relative' },
   errDot: { marginLeft:'auto', width:6, height:6, borderRadius:'50%', background:'var(--err)', boxShadow:'0 0 6px var(--err)' },
+  // ★ Guardrail 改动：普通 HITL（needs_human，跟安全策略无关）待办用琥珀色圆点，
+  //   跟"命中安全策略"的红色圆点区分开，侧边栏一眼就能分辨紧急程度
+  warnDot: { marginLeft:'auto', width:6, height:6, borderRadius:'50%', background:'var(--warn)', boxShadow:'0 0 6px var(--warn)' },
   main: { gridArea:'main', minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' },
   panelHeader: { padding:'14px 24px', borderBottom:'1px solid var(--border)', flexShrink:0 },
   panelTitle: { fontFamily:'var(--mono)', fontSize:15, fontWeight:700, color:'var(--text)' },

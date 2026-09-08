@@ -26,26 +26,35 @@ export default function HealthPanel() {
   const { data, status, loading, refresh } = useHealth(10000)
   const color = STATUS_COLOR[status] || 'var(--sub)'
 
+  // ★ Hydration fix：跟 AppShell.jsx 同样的原因——Darkreader 之类的浏览器
+  //   扩展会在 hydrate 之前抢先遍历并重写内联样式（展开成 longhand + 塞入
+  //   自己的 --darkreader-inline-* 变量和 data 属性），导致 React 拿服务端
+  //   HTML 和客户端实际 DOM 一比对就报 hydration mismatch。这不是应用代码
+  //   的 bug，样式本身完全正确。suppressHydrationWarning 只抑制"这个节点
+  //   自身"的属性不匹配警告，不会往子元素传递，所以下面给每个带内联 style
+  //   的节点（包括 lucide 图标组件，因为它们内部的 <svg> 即使没写 style
+  //   也会被 Darkreader 注入 style/data 属性）都加上了这个属性。
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20, padding:20, overflowY:'auto' }} className="fade-up">
+    <div style={{ display:'flex', flexDirection:'column', gap:20, padding:20, overflowY:'auto' }} className="fade-up" suppressHydrationWarning>
 
       {/* Status card */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <Server size={15} color="var(--accent)" />
-          <span style={styles.cardTitle}>服务状态</span>
-          <button onClick={refresh} disabled={loading} style={styles.refreshBtn} title="刷新">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin .6s linear infinite' : 'none' }} />
+      <div style={styles.card} suppressHydrationWarning>
+        <div style={styles.cardHeader} suppressHydrationWarning>
+          <Server size={15} color="var(--accent)" suppressHydrationWarning />
+          <span style={styles.cardTitle} suppressHydrationWarning>服务状态</span>
+          <button onClick={refresh} disabled={loading} style={styles.refreshBtn} title="刷新" suppressHydrationWarning>
+            <RefreshCw size={13} style={{ animation: loading ? 'spin .6s linear infinite' : 'none' }} suppressHydrationWarning />
           </button>
         </div>
 
-        <div style={{ display:'flex', alignItems:'center', gap:14, marginTop:16 }}>
-          <div style={{ ...styles.statusDot, background: color, boxShadow: `0 0 10px ${color}` }} />
-          <span style={{ fontFamily:'var(--mono)', fontSize:20, fontWeight:700, color }}>{STATUS_LABEL[status]}</span>
+        <div style={{ display:'flex', alignItems:'center', gap:14, marginTop:16 }} suppressHydrationWarning>
+          <div style={{ ...styles.statusDot, background: color, boxShadow: `0 0 10px ${color}` }} suppressHydrationWarning />
+          <span style={{ fontFamily:'var(--mono)', fontSize:20, fontWeight:700, color }} suppressHydrationWarning>{STATUS_LABEL[status]}</span>
         </div>
 
         {data && (
-          <div style={styles.metaGrid}>
+          <div style={styles.metaGrid} suppressHydrationWarning>
             <MetaItem icon={<Cpu size={13}/>}      label="工具数量" value={`${data.tool_count} 个`} />
             <MetaItem icon={<Clock size={13}/>}    label="运行时长" value={formatUptime(data.uptime_seconds)} />
             <MetaItem icon={<Database size={13}/>} label="数据库"   value={shortPath(data.checkpoint_db)} />
@@ -55,14 +64,14 @@ export default function HealthPanel() {
 
       {/* Agents list */}
       {data?.agents?.length > 0 && (
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <Cpu size={15} color="var(--accent2)" />
-            <span style={styles.cardTitle}>已注册 Agents</span>
+        <div style={styles.card} suppressHydrationWarning>
+          <div style={styles.cardHeader} suppressHydrationWarning>
+            <Cpu size={15} color="var(--accent2)" suppressHydrationWarning />
+            <span style={styles.cardTitle} suppressHydrationWarning>已注册 Agents</span>
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:14 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:14 }} suppressHydrationWarning>
             {data.agents.map(a => (
-              <span key={a} style={styles.agentBadge}>{a}</span>
+              <span key={a} style={styles.agentBadge} suppressHydrationWarning>{a}</span>
             ))}
           </div>
         </div>
@@ -70,16 +79,16 @@ export default function HealthPanel() {
 
       {/* Raw JSON */}
       {data && (
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>原始响应</span>
+        <div style={styles.card} suppressHydrationWarning>
+          <div style={styles.cardHeader} suppressHydrationWarning>
+            <span style={styles.cardTitle} suppressHydrationWarning>原始响应</span>
           </div>
-          <pre style={styles.pre}>{JSON.stringify(data, null, 2)}</pre>
+          <pre style={styles.pre} suppressHydrationWarning>{JSON.stringify(data, null, 2)}</pre>
         </div>
       )}
 
       {status === 'error' && (
-        <div style={styles.errBox}>
+        <div style={styles.errBox} suppressHydrationWarning>
           ✗ 无法连接后端，请确认 uvicorn 已启动，并检查上方 Base URL 是否正确。
         </div>
       )}
@@ -89,9 +98,9 @@ export default function HealthPanel() {
 
 function MetaItem({ icon, label, value }) {
   return (
-    <div style={styles.metaItem}>
-      <span style={{ color:'var(--sub)', display:'flex', alignItems:'center', gap:5 }}>{icon}{label}</span>
-      <span style={{ fontFamily:'var(--mono)', fontSize:12, color:'var(--text)' }}>{value}</span>
+    <div style={styles.metaItem} suppressHydrationWarning>
+      <span style={{ color:'var(--sub)', display:'flex', alignItems:'center', gap:5 }} suppressHydrationWarning>{icon}{label}</span>
+      <span style={{ fontFamily:'var(--mono)', fontSize:12, color:'var(--text)' }} suppressHydrationWarning>{value}</span>
     </div>
   )
 }

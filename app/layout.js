@@ -14,7 +14,13 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="zh-CN">
+    // ★ Hydration fix：Darkreader 之类的浏览器扩展会在 React hydrate 之前
+    //   就往根 <html> 标签上加 data-darkreader-mode / data-darkreader-scheme
+    //   等属性，导致服务端渲染的 HTML 和客户端实际 DOM 对不上，报 hydration
+    //   mismatch。这不是应用代码的 bug，是 Next.js 官方文档也专门提到的场景
+    //   （浏览器扩展修改 <html>/<body>），推荐直接在根标签加
+    //   suppressHydrationWarning 来忽略这类由扩展引入、无法控制的差异。
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         {/* Google Fonts — 和原来 index.html 一样 */}
         {/* eslint-disable @next/next/no-page-custom-font --

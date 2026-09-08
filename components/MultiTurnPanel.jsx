@@ -27,9 +27,10 @@
 //   能自动带上当前会话。
 import { useState, useRef, useEffect } from 'react'
 import { marked } from 'marked'
-import { Plus, Play, Pause, RotateCcw, Trash2, ClipboardCheck, RefreshCw } from 'lucide-react'
+import { Plus, Play, Pause, RotateCcw, Trash2, ClipboardCheck, RefreshCw, ShieldQuestion } from 'lucide-react'
 import { apiChatStream, apiGetTaskPlanState } from '../lib/client.js'
 import { setCurrentThread, navigateTo } from '../lib/shared.js'
+import { classifyGateItems, summarizeGateItems } from '../lib/guardrail.js'
 
 const EXAMPLE_TURNS = [
   '我叫 Leo，34 岁，住在上海，是一名独立游戏开发者，专注做手机端解谜游戏。',
@@ -47,13 +48,16 @@ const EXAMPLE_TURNS = [
   '综合你知道的所有信息，判断一下：我现在压力大吗？给出理由，再写一段 60 字以内的个人简介。',
 ]
 
-function TimelineStep({ type, label, content, ms, isStreaming, gateCount, checking, recheckNote, onGoReview, onRecheck }) {
+function TimelineStep({ type, label, content, ms, isStreaming, gateCount, gateKind, checking, recheckNote, onGoReview, onRecheck }) {
   const isInterrupted = type === 'interrupted'
+  const isGuardrail = isInterrupted && gateKind === 'guardrail'
   const dotStyle = {
     user: { bg:'#1a2d50', border:'#2a3a60', color:'#93c5fd', label:'U' },
     ai:   { bg:'#111827', border:'#1e2d4a', color:'var(--accent2)', label:'AI' },
     err:  { bg:'#2d1515', border:'#5a2020', color:'var(--err)', label:'!' },
-    interrupted: { bg:'#3a2d10', border:'#6a5220', color:'var(--warn)', label:'!' },
+    interrupted: isGuardrail
+      ? { bg:'#2d1515', border:'#5a2020', color:'var(--err)', label:'!' }
+      : { bg:'#3a2d10', border:'#6a5220', color:'var(--warn)', label:'!' },
   }[type] || { bg:'var(--s2)', border:'var(--border)', color:'var(--sub)', label:'?' }
 
   return (
@@ -64,27 +68,31 @@ function TimelineStep({ type, label, content, ms, isStreaming, gateCount, checki
           justifyContent:'center', fontSize:11, fontWeight:700,
           background:dotStyle.bg, border:`1px solid ${dotStyle.border}`, color:dotStyle.color,
           fontFamily:'var(--mono)',
-        }}>{dotStyle.label}</div>
+        }}>{isGuardrail ? <ShieldQuestion size={14} /> : dotStyle.label}</div>
         <div style={{ flex:1, width:1, background:'var(--border)', marginTop:1 }} />
       </div>
 
       <div style={{ flex:1, paddingBottom:16, minWidth:0 }}>
         <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--sub)',
           marginBottom:6, textTransform:'uppercase', letterSpacing:'.06em' }}>
-          {label}
+          {label} 
           {ms != null && <span style={{ marginLeft:8, color:'var(--border2)' }}>{ms}ms</span>}
         </div>
 
         {isInterrupted ? (
           <div style={{
-            background:'rgba(251,191,36,.08)',
-            border:'1px solid rgba(251,191,36,.35)',
+            background: isGuardrail ? 'rgba(248,113,113,.08)' : 'rgba(251,191,36,.08)',
+            border: `1px solid ${isGuardrail ? 'rgba(248,113,113,.35)' : 'rgba(251,191,36,.35)'}`,
             borderRadius:9, padding:'12px 14px', fontSize:13.5, lineHeight:1.75,
             color:'var(--text)', display:'flex', flexDirection:'column', gap:10,
           }}>
+            {isGuardrail && (
+              <span style={{ fontFamily:'var(--mono)', fontSize:11, fontWeight:700, color:'var(--err)',
+                textTransform:'uppercase', letterSpacing:'.04em' }}>安全策略拦截</span>
+            )}
             <span style={{ whiteSpace:'pre-wrap' }}>{content}</span>
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-              <button onClick={onGoReview} style={styles.reviewBtn}>
+              <button onClick={onGoReview} style={isGuardrail ? { ...styles.reviewBtn, background:'var(--err)', color:'#1a0a0a' } : styles.reviewBtn}>
                 <ClipboardCheck size={13}/> 前往人工审核（{gateCount ?? 0} 项）
               </button>
               <button
@@ -139,6 +147,10 @@ export default function MultiTurnPanel() {
   const [running,  setRunning]  = useState(false)
   const [paused,   setPaused]   = useState(false)
   const [awaitingHuman, setAwaitingHuman] = useState(false)
+  // ★ Guardrail 改动：单独记一下"当前卡住的这一轮是不是 guardrail 触发的"，
+  //   只用于顶部提示条的文案/配色，不参与任何流程控制判断（awaitingHuman
+  //   这个布尔值本身的语义和所有既有判断逻辑完全不变，降低改动风险）。
+  const [awaitingHumanKind, setAwaitingHumanKind] = useState('plain')
   const [delay,    setDelay]    = useState(0)
 
   const bottomRef   = useRef(null)
@@ -181,6 +193,7 @@ export default function MultiTurnPanel() {
     setThreadId(null)
     setPaused(false)
     setAwaitingHuman(false)
+    setAwaitingHumanKind('plain')
   }
 
   const requestPause = () => {
@@ -226,16 +239,22 @@ export default function MultiTurnPanel() {
 
     try {
       const state = await apiGetTaskPlanState(tid, step.userId || 'default')
+
       updateTimeline(t => {
         const c = [...t]
         if (state.is_awaiting_human) {
+          const gateItems = state.pending_gate_items || []
+          const { dominant, guardrailCount } = classifyGateItems(gateItems)
           c[stepIndex] = {
             ...c[stepIndex],
             checking: false,
-            gateCount: (state.pending_gate_items || []).length,
+            gateCount: gateItems.length,
+            gateKind: dominant,
             recheckNote: {
               kind: 'still-waiting',
-              text: `仍在等待人工审核（${(state.pending_gate_items || []).length} 项待处理） · ${new Date().toLocaleTimeString()}`,
+              text: dominant === 'guardrail'
+                ? `仍在等待安全审核（${guardrailCount} 项待处理） · ${new Date().toLocaleTimeString()}`
+                : `仍在等待人工审核（${gateItems.length} 项待处理） · ${new Date().toLocaleTimeString()}`,
             },
           }
         } else {
@@ -250,12 +269,13 @@ export default function MultiTurnPanel() {
             checking: false,
             type: isAborted ? 'err' : 'ai',
             label: isAborted
-              ? String(c[stepIndex].label).replace('等待人工审核', '已终止')
-              : String(c[stepIndex].label).replace('等待人工审核', 'AI 响应'),
+              ? String(c[stepIndex].label).replace(/安全审核中|等待人工审核/g, '已终止')
+              : String(c[stepIndex].label).replace(/安全审核中|等待人工审核/g, 'AI 响应'),      
             content: state.answer || fallback,
             streaming: false,
             recheckNote: null,
             gateCount: undefined,
+            gateKind: undefined,
           }
         }
         return c
@@ -374,13 +394,15 @@ export default function MultiTurnPanel() {
               setCurrentThread({ userId: 'default', threadId: tid })
             }
             const gateItems = payload.pending_gate_items || []
+            const { dominant } = classifyGateItems(gateItems)
             updateTimeline(t => {
               const c = [...t]
               c[c.length-1] = {
                 type: 'interrupted',
-                label: `第 ${i+1} 轮 · 等待人工审核`,
-                content: `本次请求中有 ${gateItems.length} 个任务需要人工确认后才能继续（自动重试已耗尽，或涉及高风险操作）。`,
+                label: dominant === 'guardrail' ? `第 ${i+1} 轮 · 安全审核中` : `第 ${i+1} 轮 · 等待人工审核`,
+                content: summarizeGateItems(gateItems),
                 gateCount: gateItems.length,
+                gateKind: dominant,
                 threadId: tid || currentThread,
                 userId: 'default',
                 streaming: false,
@@ -400,13 +422,15 @@ export default function MultiTurnPanel() {
               setCurrentThread({ userId: 'default', threadId: tid })
             }
             const gateItems = payload.pending_gate_items || []
+            const { dominant } = classifyGateItems(gateItems)
             updateTimeline(t => {
               const c = [...t]
               c[c.length-1] = {
                 type: 'interrupted',
-                label: `第 ${i+1} 轮 · 等待人工审核`,
+                label: dominant === 'guardrail' ? `第 ${i+1} 轮 · 安全审核中` : `第 ${i+1} 轮 · 等待人工审核`,
                 content: payload.message || '当前会话存在未处理完的人工审核事项，请先处理完再发新消息。',
                 gateCount: gateItems.length,
+                gateKind: dominant,
                 threadId: tid || currentThread,
                 userId: 'default',
                 streaming: false,
@@ -434,6 +458,8 @@ export default function MultiTurnPanel() {
       if (interruptedThisTurnRef.current) {
         resumeIndexRef.current = i + 1
         setAwaitingHuman(true)
+        // 刚写进 timeline 的最后一步就是这一轮的中断记录，直接读它的 gateKind
+        setAwaitingHumanKind(timelineRef.current[timelineRef.current.length - 1]?.gateKind || 'plain')
         setPaused(false)
         setRunning(false)
         await saveTimeline()
@@ -461,10 +487,10 @@ export default function MultiTurnPanel() {
           {awaitingHuman ? (
             <button
               disabled
-              title="请先在「人工审核」处理完当前中断，再点卡片上的「刷新状态」"
+              title={awaitingHumanKind === 'guardrail' ? '请先在「人工审核」处理完当前的安全策略拦截，再点卡片上的「刷新状态」' : '请先在「人工审核」处理完当前中断，再点卡片上的「刷新状态」'}
               style={{ ...styles.runBtn, opacity: 0.55, cursor: 'not-allowed' }}
             >
-              <Play size={13}/> 等待人工审核…
+              <Play size={13}/> {awaitingHumanKind === 'guardrail' ? '等待安全审核…' : '等待人工审核…'}
             </button>
           ) : hasResumePoint ? (
             <button onClick={()=>run(true)} disabled={running} style={styles.runBtn}>
@@ -504,8 +530,10 @@ export default function MultiTurnPanel() {
             </div>
           )}
           {awaitingHuman && (
-            <div style={styles.hitlBadge}>
-              ! 等待人工审核 · 处理完后请点时间线上的「刷新状态」
+            <div style={awaitingHumanKind === 'guardrail' ? styles.guardrailBadge : styles.hitlBadge}>
+              {awaitingHumanKind === 'guardrail'
+                ? '🛡 安全策略拦截 · 处理完后请点时间线上的「刷新状态」'
+                : '! 等待人工审核 · 处理完后请点时间线上的「刷新状态」'}
             </div>
           )}
         </div>
@@ -609,6 +637,12 @@ const styles = {
   hitlBadge: {
     background:'rgba(251,191,36,.12)', border:'1px solid rgba(251,191,36,.4)',
     borderRadius:99, padding:'3px 12px', fontSize:11, color:'var(--warn)',
+    fontFamily:'var(--mono)',
+  },
+  // ★ Guardrail 改动：安全策略拦截时的顶部提示条，红色调，跟 hitlBadge 区分开
+  guardrailBadge: {
+    background:'rgba(248,113,113,.12)', border:'1px solid rgba(248,113,113,.4)',
+    borderRadius:99, padding:'3px 12px', fontSize:11, color:'var(--err)',
     fontFamily:'var(--mono)',
   },
   reviewBtn: {

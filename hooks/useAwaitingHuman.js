@@ -13,22 +13,29 @@
 import { useState, useEffect, useCallback } from 'react'
 import { apiGetTaskPlanState } from '../lib/client.js'
 import { getCurrentThread, onCurrentThreadChange } from '../lib/shared.js'
+import { classifyGateItems } from '../lib/guardrail.js'
 
 export function useAwaitingHuman(autoRefreshMs = 8000) {
   const [thread, setThread]   = useState(() => getCurrentThread())
   const [isAwaiting, setIsAwaiting] = useState(false)
   const [gateCount, setGateCount]   = useState(0)
+  // ★ Guardrail 改动：额外暴露"这批待办事项里有没有 guardrail 触发的"，
+  //   供 AppShell 侧边栏把提醒红点在安全相关时换成更醒目的样式。
+  const [hasGuardrail, setHasGuardrail] = useState(false)
 
   const check = useCallback(async (t) => {
-    if (!t?.threadId) { setIsAwaiting(false); setGateCount(0); return }
+    if (!t?.threadId) { setIsAwaiting(false); setGateCount(0); setHasGuardrail(false); return }
     try {
       const res = await apiGetTaskPlanState(t.threadId, t.userId)
+      const items = res.pending_gate_items || []
       setIsAwaiting(!!res.is_awaiting_human)
-      setGateCount((res.pending_gate_items || []).length)
+      setGateCount(items.length)
+      setHasGuardrail(classifyGateItems(items).hasGuardrail)
     } catch {
       // 会话不存在（404）或后端未就绪，静默忽略，不打扰用户
       setIsAwaiting(false)
       setGateCount(0)
+      setHasGuardrail(false)
     }
   }, [])
 
@@ -37,10 +44,10 @@ export function useAwaitingHuman(autoRefreshMs = 8000) {
 
   // 轮询
   useEffect(() => {
-    check(thread)
+    check(thread) // eslint-disable-line react-hooks/set-state-in-effect -- 订阅外部系统（轮询后端状态），属于合法用法
     const timer = setInterval(() => check(thread), autoRefreshMs)
     return () => clearInterval(timer)
   }, [thread, autoRefreshMs, check])
 
-  return { isAwaiting, gateCount, thread }
+  return { isAwaiting, gateCount, hasGuardrail, thread }
 }
